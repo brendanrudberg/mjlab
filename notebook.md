@@ -66,3 +66,65 @@ works over ethernet; wifi times out, probably campus client isolation.
 asked for a standalone MuJoCo sim running a trained policy outside mjlab
 (sesteban951/Mujoco_Example).
 
+## 2026-10-24
+
+**Started the C1 task config.** Working from the G1 velocity task as a template.
+Approach: sort every piece of the G1 config into three buckets rather than
+renaming blindly.
+- Direct rename: body/joint/site/geom names
+- Remove: anything referencing DOFs the planar robot doesn't have (lateral
+  velocity, yaw rate, arm and waist entries in the pose std dict)
+- Rethink: foot_clearance and foot_slip (no ankle, sphere foot on rigid shin),
+  upright (only pitch to control, not roll), and the velocity command (one
+  component, not three)
+
+**Actuator spec.** Using the MyActuator RMD-X8 120 Nm BLDCs the lab already has.
+Published specs: gear ratio 19.612, 48V, no-load 158 RPM (16.5 rad/s), rated
+127 RPM (13.3 rad/s), rated torque 43 Nm, peak torque 110 Nm, rated output
+574 W.
+
+**Armature.** Datasheet lists one MOI value, 1.5 kg*cm^2, between the load
+specs and encoder type, so placement is ambiguous. Assuming rotor-side, since
+an output-referred value that small would imply the actuator could accelerate
+its own inertia at ~287,000 rad/s^2, which is nonsense for a geared servo.
+
+ARMATURE = 1.5e-4 * 19.61^2 = 0.0577 kg*m^2
+
+This is a LOWER BOUND. It excludes the gearbox's own rotating mass, which the
+G1 constants account for with per-stage rotor inertias. No per-stage data
+available for this motor. TODO: email MyActuator to confirm rotor-side vs
+output-side, and ask for per-stage breakdown and the torque-speed curve.
+
+For scale: thigh inertia about the hip is roughly 0.23 kg*m^2, so armature is
+~25% of it. Diya's placeholder armature of 0.01 is ~6x too low.
+
+**Gains.** G1 uses NATURAL_FREQ = 10 Hz and DAMPING_RATIO = 2.0, with
+stiffness = armature * w_n^2 and damping = 2 * zeta * armature * w_n. Two
+things to note: zeta=2 is overdamped, not critical, and the formula uses
+armature alone rather than armature + link inertia. Asked Sergio whether to
+use zeta=1 for the C1.
+
+At 10 Hz and armature 0.0577: k_p ~ 228, k_d ~ 14.5 at zeta=2. Diya's
+placeholder was k_p=100.
+
+**Limits decision (mine, not confirmed).** Hard limits at peak values
+(110 Nm, 16.5 rad/s) so the policy has headroom and isn't clipped. Soft penalty
+starting near rated (43 Nm, 13.3 rad/s) so burst torque is available for
+landings but sustained high demand is discouraged. Known limitation: MuJoCo's
+forcerange is a flat cap, not a torque-speed curve, so the sim permits
+operating points the real motor can't reach. Plan to check logged
+torque-speed pairs against the real curve afterward.
+
+**Study design.** Two outputs with different consumers:
+- Peak joint torque for actuator sizing (cares about sustained demand)
+- Peak GRF at touchdown for Diya's structural design (cares about worst case,
+  and is probably the binding constraint for a backflip landing)
+Penalty weight sets the answer, so plan a sweep across weights rather than a
+single run, plus multiple seeds.
+
+**Timeline committed to Sergio:** first training run on the planar robot by
+Wed Oct 28, real torque/GRF numbers by Nov 1.
+
+**Open questions sent to Sergio:** damping ratio for the C1. Also asked whether
+he wants the standalone MuJoCo sim (sesteban951/Mujoco_Example) before or after
+the planar training.
