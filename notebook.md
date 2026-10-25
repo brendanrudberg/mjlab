@@ -34,3 +34,35 @@ Diya has CAD and a first XML; Sergio sent six notes on it (planar joint for the 
 Your piece: RL to determine expected max torque and speeds. Current thinking is generous hard limits plus a soft penalty at conservative motor specs, swept across penalty weights.
 Leg mass figures from Diya’s design: 18 lb hips, 7 lb/thigh, 3 lb/shin, 1.5 lb/foot. ~56% of total mass in the legs, swing inertia roughly 1.4 kg·m² per leg, dominated by shin and foot.
 
+## 2026-10-23
+
+**Talos disk fixed.** Home was on the root disk while everyone else's is on
+the overflow pool, and root was at 100%, so compilation and training failed.
+Gary moved it. Now on overflow/brudberg, 300G with 294G free.
+
+**G1 smoke test.** Ran Mjlab-Velocity-Flat-Unitree-G1 at 4096 envs. Reward
+climbing, logging to wandb under amber-biped. Pipeline confirmed working.
+Run crashed partway with CUDA_ERROR_ECC_UNCORRECTABLE on GPU 7; retry on the
+same GPU then failed at context creation (cudaErrorDevicesUnavailable).
+ECC counters read zero across all GPUs. Hardware fault, not config. Reported
+to Gary.
+
+**Lab PC diagnosis.** Two separate issues:
+- Crashes: journalctl showed a crash/reboot loop on 2026-07-27, ten boots in
+  ~40 min, several ending mid-stream with no shutdown. Consistent with RAM or
+  EXPO/XMP instability on AMD Zen. Reseated RAM, stress-ng passed. Overnight
+  memtest86+ still pending.
+- No GPU driver: NVIDIA card present on PCI bus (10DE:2F04, MSI board) but no
+  kernel module bound, no nouveau, no blacklist. nvtop only saw the Ryzen
+  integrated graphics. July 27 logs showed the nvidia module missing for the
+  running kernel and dpkg left half-configured, likely interrupted by those
+  crashes. Installed nvidia-driver-595-open, rebooted, G1 velocity task
+  trained successfully.
+
+**Lab PC setup.** uv, mjlab fork cloned, venv built, wandb logged in. SSH
+works over ethernet; wifi times out, probably campus client isolation.
+
+**Next:** build the C1 task config from the G1 velocity template. Sergio also
+asked for a standalone MuJoCo sim running a trained policy outside mjlab
+(sesteban951/Mujoco_Example).
+
