@@ -89,12 +89,12 @@
         </body>
     </worldbody>
 
-    <actuator>
+    <!--<actuator>
         <position name="R_hip_joint_act" joint="R_hip_joint" kp="100" ctrlrange="-1.57 1.57" forcerange="-40 40"/>
         <position name="R_knee_joint_act" joint="R_knee_joint" kp="60" ctrlrange="0 2.35" forcerange="-30 30"/>
         <position name="L_hip_joint_act" joint="L_hip_joint" kp="100" ctrlrange="-1.57 1.57" forcerange="-40 40"/>
         <position name="L_knee_joint_act" joint="L_knee_joint" kp="60" ctrlrange="0 2.35" forcerange="-30 30"/>
-    </actuator>
+    </actuator> -->
 
     <contact>
         <exclude body1="base_link" body2="R_thigh_link"/>

@@ -128,3 +128,80 @@ Wed Oct 28, real torque/GRF numbers by Nov 1.
 **Open questions sent to Sergio:** damping ratio for the C1. Also asked whether
 he wants the standalone MuJoCo sim (sesteban951/Mujoco_Example) before or after
 the planar training.
+
+## 2026-10-27
+
+**Missed the first 1:1 with Sergio** (Tue 12pm, scheduled a day prior). Rescheduled
+to Fri Oct 30, 3:30pm. Put all six biweekly meetings in the calendar with reminders.
+
+**Built the C1 asset config and test suite.**
+- `src/mjlab/asset_zoo/robots/caltech_c1/c1_constants.py`, adapted from the G1
+- `tests/test_c1_constants.py`, adapted from the G1 test
+- Task folder scaffolded at `src/mjlab/tasks/velocity/config/c1`
+
+**Gains, from BeyondMimic (arXiv 2508.08241) Supplementary S1.** Sergio pointed to
+this as the design philosophy behind the G1 constants.
+- k_p = I * w_n^2, k_d = 2 * zeta * I * w_n, where I is the armature only
+- They use armature alone because subtree inertia varies with configuration and
+  exact precision isn't required
+- zeta = 2 (overdamped) specifically compensates for that underestimate. These two
+  choices go together.
+- w_n = 10 Hz. Their ablation (Fig S2) tested 5/10/25 Hz; 25 Hz gave slightly
+  better local tracking but produced audible gearbox oscillation from torque
+  overshoot, so they rejected it. 10 Hz promotes compliance with moderate gains.
+- Action scale alpha = 0.25 * tau_max / k_p, assuming contacts occur near the
+  default pose and max joint torque scales with expected load.
+- Their armature ablation: setting it to zero causes excessive joint accelerations,
+  overswinging, and self-collisions. They call it a real physical contribution,
+  not a numerical stability knob. Good support for replacing Diya's 0.01 with 0.0577.
+
+**Test failures found three real problems.**
+
+1. *Duplicate actuators.* num_actuators came back as 8. Diya's XML defines four
+   `<position>` actuators and my config added four more. Caught it because
+   gainprm[0] was 100.0 (her kp) instead of 227.7 (mine). Fixed by removing the
+   actuator block from the XML and letting mjlab build them from config, which is
+   how the G1 asset works.
+
+2. *Collision config not applying.* geom_names_expr was `.*_collision` (G1
+   convention) but Diya's geoms end in `_geom`, so it selected zero geoms and the
+   whole CollisionCfg was a no-op. Caught it because foot friction was
+   [2, 0.05, 0.01] (her XML) rather than my 0.6. Fixed the regexes.
+
+3. *The planar base conflicts with mjlab.* This is the significant one.
+
+**The planar base problem.** mjlab's `is_fixed_base` checks for a freejoint. My
+robot's base is three separate joints (root_x slide, root_z slide, root_phi hinge),
+so mjlab classifies it as fixed-base. Consequences:
+- `init_state.pos` and `rot` are ignored (only applied to floating bases), so the
+  keyframe base height of 0.76 never gets set
+- `entity/data.py` has five is_fixed_base branches around root pose and root
+  velocity. For a genuinely fixed base those return constants, which is correct
+  for a bolted-down arm but wrong for my robot, which does translate and rotate.
+- `envs/mdp/events.py` has four more branches, including what look like
+  reset_root_state and push_robot
+
+If root_lin_vel_w returns a constant, the velocity tracking reward has nothing to
+track and the policy would be rewarded identically for walking and standing still.
+So this would silently break training, not just fail a test.
+
+**Three options:**
+1. Override root state for the C1, computing it from the three joint values
+2. Add planar-base support to mjlab in the fork: teach is_fixed_base to
+   distinguish welded / floating / planar, and assemble root state from the
+   planar joints
+3. Freejoint plus equality constraints locking y, roll, yaw
+
+Option 3 is fastest but contradicts Sergio's explicit instruction to Diya, changes
+a file she owns, and mixes constraint forces into the dynamics the torque study
+measures. Option 2 is the honest fix but means diverging from upstream.
+
+Not deciding this alone. Taking it to Friday.
+
+**Timeline.** The Wednesday first-run and Nov 1 numbers deadlines are slipping
+because of this. Told Sergio rather than letting the date pass.
+
+**Next (doesn't depend on the base question):** write the rewards, terminations,
+and observations for the C1 task. Also still open: `.*_collision` leftovers, the
+120 vs 110 Nm effort limit, and the armature comment needs updating to say lower
+bound / rotor-side assumed.

@@ -18,7 +18,7 @@ from mjlab.utils.spec_config import CollisionCfg
 ##
 
 C1_XML: Path = (
-  MJLAB_SRC_PATH / "asset_zoo" / "robots" / "caltech_c1" / "xmls" / "c1.xml"
+  MJLAB_SRC_PATH / "asset_zoo" / "robots" / "caltech_c1" / "xmls" / "mario_primitive.xml"
 )
 assert C1_XML.exists()
 
@@ -93,19 +93,19 @@ KNEES_BENT_KEYFRAME = EntityCfg.InitialStateCfg(
 # Self-collisions are given condim=1 while foot collisions
 # are given condim=3.
 FULL_COLLISION = CollisionCfg(
-  geom_names_expr=(".*_collision",),
+  geom_names_expr=(".*_geom",),
   contype=1,
   conaffinity=1,
-  condim={r"^(L|R)_foot_geom$": 3, ".*_collision": 1},
+  condim={r"^(L|R)_foot_geom$": 3, ".*_geom": 1},
   priority={r"^(L|R)_foot_geom$": 1, ".*": 0},
   friction={r"^(L|R)_foot_geom$": (0.6,)},
 )
 
 FULL_COLLISION_WITHOUT_SELF = CollisionCfg(
-  geom_names_expr=(".*_collision",),
+  geom_names_expr=(".*_geom",),
   contype=0,
   conaffinity=1,
-  condim={r"^(L|R)_foot_geom$": 3, ".*_collision": 1},
+  condim={r"^(L|R)_foot_geom$": 3, ".*_geom": 1},
   priority={r"^(L|R)_foot_geom$": 1, ".*": 0},
   friction={r"^(L|R)_foot_geom$": (0.6,)},
 )
