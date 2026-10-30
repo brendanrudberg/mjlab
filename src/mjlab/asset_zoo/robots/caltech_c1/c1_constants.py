@@ -32,7 +32,7 @@ def get_spec() -> mujoco.MjSpec:
 ##
 
 # Motor specs (from MyActuator). No stage MOIs, so we assume a single-stage gearbox.
-ROTOR_INERTIA_RMDX8120 = 1.5e-4
+ROTOR_INERTIA_RMDX8120 = 1.262e-4 # Manufacturer email
 GEAR_RMDX8120 = 19.61
 
 ARMATURE_RMDX8120 = ROTOR_INERTIA_RMDX8120 * GEAR_RMDX8120**2
