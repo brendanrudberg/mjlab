@@ -9,6 +9,7 @@ import pytest
 from mjlab.asset_zoo.robots.caltech_c1 import c1_constants
 from mjlab.entity import Entity, RootType
 from mjlab.utils.string import resolve_expr
+from mjlab.sim.sim import Simulation, SimulationCfg
 
 
 @pytest.fixture(scope="module")
@@ -43,13 +44,21 @@ def test_actuator_parameters(c1_model, actuator_config, stiffness, damping):
       assert actuator.forcerange[0] == -actuator_config.effort_limit
       assert actuator.forcerange[1] == actuator_config.effort_limit
 
+def initialize_entity_with_sim(entity, device, num_envs=1):
+  """Initialize an entity with a simulation."""
+  model = entity.compile()
+  sim_cfg = SimulationCfg(njmax=75)
+  sim = Simulation(num_envs=num_envs, cfg=sim_cfg, model=model, device=device)
+  entity.initialize(model, sim.model, sim.data, device)
+  return entity, sim
 
 def test_keyframe_base_position(c1_model) -> None:
   data = mujoco.MjData(c1_model)
   mujoco.mj_resetDataKeyframe(c1_model, data, 0)
   mujoco.mj_forward(c1_model, data)
-  np.testing.assert_array_equal(data.qpos[:3], c1_constants.KNEES_BENT_KEYFRAME.pos)
-  np.testing.assert_array_equal(data.qpos[3:7], c1_constants.KNEES_BENT_KEYFRAME.rot)
+  kf = c1_constants.KNEES_BENT_KEYFRAME
+  expected_pitch = 2.0 * np.arctan2(kf.rot[2], kf.rot[0])
+  np.testing.assert_allclose(data.qpos[:3], [kf.pos[0], kf.pos[2], expected_pitch])
 
 
 def test_keyframe_joint_positions(c1_entity, c1_model) -> None:
@@ -119,7 +128,6 @@ def test_c1_entity_creation(c1_entity) -> None:
   assert c1_entity.is_actuated
   assert not c1_entity.is_fixed_base
   assert c1_entity.root_type == RootType.PLANAR
-
 
 def test_c1_actuators_configured_correctly(c1_model):
   """Verify that all C1 actuators have correct control and force limiting.

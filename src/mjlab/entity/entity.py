@@ -62,6 +62,8 @@ class EntityIndexing:
   joint_v_adr: torch.Tensor
   free_joint_q_adr: torch.Tensor
   free_joint_v_adr: torch.Tensor
+  planar_joint_q_adr: torch.Tensor
+  planar_joint_v_adr: torch.Tensor
 
   @property
   def root_body_id(self) -> int:
@@ -371,6 +373,8 @@ class Entity:
 
     if self._free_joint is not None:
       qpos_components.extend([self.cfg.init_state.pos, self.cfg.init_state.rot])
+    elif self._planar_joints:
+      qpos_components.append(self._planar_init_qpos())
 
     joint_pos = None
     if self._non_free_joints:
@@ -391,6 +395,17 @@ class Entity:
     if self.is_fixed_base:
       self.root_body.pos[:] = self.cfg.init_state.pos
       self.root_body.quat[:] = self.cfg.init_state.rot
+
+  def _planar_init_qpos(self) -> np.ndarray:
+    """Base qpos for a planar root, in the XML's declaration order."""
+    x, _, z = self.cfg.init_state.pos
+    w, qx, qy, qz = self.cfg.init_state.rot
+    pitch = 2.0 * np.arctan2(qy, w)  # exact for a pure rotation about y
+    by_name = dict(zip(
+      (j.name for j in self._planar_joints),  # ordered (x, z, pitch)
+      (x, z, pitch),
+    ))
+    return np.array([by_name[j.name] for j in self.root_body.joints])
 
   # Attributes.
 
@@ -1299,26 +1314,19 @@ class Entity:
     planar_joint_q_adr = []
     planar_joint_v_adr = []
 
-    root_joint_names = {j.name for j in self.root_body.joints} #get rid
-    if len(self.root_body.joints) == 3:
-      root_joint_list = [(2, (1, 0, 0)), (2, (0, 0, 1)), (3, (0, 1, 0))]
-      root_joints = {}
-      for joint in self.root_body.joints:
-        jnt = model.joint(joint.name)
-        jnt_type = jnt.type[0]
-        jnt_axis = jnt.axis
-        root_joints[(jnt_type, tuple(jnt_axis))] = jnt
-      if set(root_joints) != set(root_joint_list):
-        pass
-      for pair in root_joint_list:
-        jnt = root_joints[pair]
-        jnt_type = jnt.type[0]
-        vadr = jnt.dofadr[0]
-        qadr = jnt.qposadr[0]
-        planar_joint_v_adr.extend(range(vadr, vadr + dof_width(jnt_type)))
-        planar_joint_q_adr.extend(range(qadr, qadr + qpos_width(jnt_type)))
+    # Planar base addresses, in (x, z, pitch) order.
+    planar_joint_names = {j.name for j in self._planar_joints}
+    for joint in self._planar_joints:
+      jnt = model.joint(joint.name)
+      jnt_type = jnt.type[0]
+      vadr = jnt.dofadr[0]
+      qadr = jnt.qposadr[0]
+      planar_joint_v_adr.extend(range(vadr, vadr + dof_width(jnt_type)))
+      planar_joint_q_adr.extend(range(qadr, qadr + qpos_width(jnt_type)))
 
     for joint in self.spec.joints:
+      if joint.name in planar_joint_names:
+        continue  # base joints, handled above
       jnt = model.joint(joint.name)
       jnt_type = jnt.type[0]
       vadr = jnt.dofadr[0]
@@ -1326,12 +1334,10 @@ class Entity:
       if jnt_type == mujoco.mjtJoint.mjJNT_FREE:
         free_joint_v_adr.extend(range(vadr, vadr + 6))
         free_joint_q_adr.extend(range(qadr, qadr + 7))
-      elif joint.name in root_joint_names:
-        planar_joint_v_adr.extend(range(vadr, vadr + dof_width(jnt_type)))
-        planar_joint_q_adr.extend(range(qadr, qadr + qpos_width(jnt_type)))
       else:
         joint_v_adr.extend(range(vadr, vadr + dof_width(jnt_type)))
         joint_q_adr.extend(range(qadr, qadr + qpos_width(jnt_type)))
+
     joint_q_adr = torch.tensor(joint_q_adr, dtype=torch.int, device=device)
     joint_v_adr = torch.tensor(joint_v_adr, dtype=torch.int, device=device)
     free_joint_v_adr = torch.tensor(free_joint_v_adr, dtype=torch.int, device=device)
@@ -1373,6 +1379,8 @@ class Entity:
       joint_v_adr=joint_v_adr,
       free_joint_q_adr=free_joint_q_adr,
       free_joint_v_adr=free_joint_v_adr,
+      planar_joint_q_adr=planar_joint_q_adr,
+      planar_joint_v_adr=planar_joint_v_adr,
     )
 
   def _apply_actuator_controls(self) -> None:
