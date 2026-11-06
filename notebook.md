@@ -205,3 +205,148 @@ because of this. Told Sergio rather than letting the date pass.
 and observations for the C1 task. Also still open: `.*_collision` leftovers, the
 120 vs 110 Nm effort limit, and the armature comment needs updating to say lower
 bound / rotor-side assumed.
+
+## 2026-11-01
+
+Full day on the ME 90 background and objectives report. Most of the time went
+into reading rather than writing.
+
+**Co-design literature.** Searched it properly for the first time. The field
+calls what I'd been describing "co-design" and it goes back further than I
+assumed (Sims 1994 for evolutionary morphology search; analytic model-based
+methods predate the learning-based work). Read C² (arXiv 2209.06579) in full.
+
+Taxonomy from their related work:
+- Analytic vs data-driven. Analytic requires deriving equations of motion and
+  hand-specifying constraints per candidate design. Data-driven learns the
+  policy through interaction, so no analytical model per design.
+- Morphology-changing vs topology-unchanging. Topology-changing methods produce
+  structures that are asymmetric or place motors unreasonably, so they aren't
+  physically deployable.
+- Most data-driven methods are bi-level: inner loop trains a policy for a
+  candidate, outer loop picks the next candidate from the resulting fitness.
+  Expensive, and most of the field's effort targets that cost.
+
+C² specifically: a population network conditioned on morphology parameters acts
+as a surrogate Q-function, so you can score a design without training a policy
+for it. Their contribution is fixing two failures in that scheme (exploration
+error from offline training, and distribution shift when warm-starting the
+individual network on a new morphology).
+
+**Correction I had to make.** I'd drafted an opening claiming this project
+"inverts" the usual order by using RL to drive hardware design. That's roughly
+what the entire co-design field does, and EA-CoRL's intro says nearly the same
+sentence. GLAMDRING (arXiv 2609.19452) is closest to my actual method: they
+resolve link lengths and actuators post-hoc from the policy's logged operating
+envelope. So the logged-envelope idea isn't mine to claim.
+
+What is distinct: I'm not searching the design space at all. One proposed
+design, one policy, read off the loads. That's one iteration of a
+human-in-the-loop design cycle, not automated co-design.
+
+**Second correction, bigger.** I'd built the whole framing around co-design,
+then realized the paper should really be about jumping RL on a cheap point-foot
+platform, with the load numbers as one output among several. Rewrote motivation
+and shrank the co-design paragraph from eight sentences to three. Noting this
+because I adopted the frame early and spent a couple of hours justifying it
+before testing whether it was the right frame.
+
+**Point-foot biped literature.** Searched for prior RL work on this
+configuration:
+- RABBIT (Chevallereau 2003): five-link planar point-foot, the platform HZD was
+  developed on. Human-scale, expensive research testbed.
+- Bolt (Roux 2025): point-foot biped from ODRI, built from Solo's actuator
+  modules with 3D printed parts. Legs roughly 0.3 m. Constrained RL with CaT,
+  sim-to-real. Closest to my setup in spirit, much smaller.
+- Cassie (Li 2024, IJRR): armless, walks, runs, jumps on hardware. 400 m in
+  2:34, 1.4 m long jump. Not point-foot (has ankle actuation).
+- ADAM (Ghansah, Kim, Li, Ames 2024): point-foot humanoid, HZD gaits stabilized
+  by HLIP step-length regulation. Reported as the first humanoid point-foot
+  walking. AMBER paper, found via Bolt's bibliography.
+
+Bolt's authors note that prior point-foot bipedal walking used quadrupedal
+robots, which have extra limbs for angular momentum, and that armless point-foot
+bipeds have received limited attention.
+
+**Killed a novelty claim.** Had written that this project "takes the planar
+platform one step further by introducing running." Cassie is armless and
+already runs and jumps. Dropped the claim entirely.
+
+**Useful data point for later:** Bolt's measured mean GRF during walking is
+90% ± 6.2% of body weight. I'd been about to write "several times body weight"
+for impact forces with no source. Cut it.
+
+**PPO internals.** Worked through the loop properly rather than treating it as
+a black box: collect with a frozen policy (24 steps x 4096 envs), compute GAE
+advantages and detach them, then ~5 epochs of updates on that batch, discard,
+repeat. The probability ratio exists for importance sampling (the data came
+from the pre-update policy); the clip is what makes reusing the batch safe.
+Critic exists to give per-step credit, which is what makes this tractable on
+500-step episodes.
+
+Not directly needed for the report, but I'd been hand-waving it.
+
+**Report state at end of day:** motivation, background (3 paragraphs), and
+objectives drafted. Citations identified but not yet formatted.
+
+## 2026-11-04
+
+**Submitted the background/objectives report** (late, no figure). Four pages in
+the sn-jnl template. Content is fine; the weak spots if anyone pushes are the
+thin co-design paragraph and the week-ten timeline.
+
+**Emailed Ames (cc Catherine) to schedule the first-term presentation.** Dec 7-11
+window, 10 min + 5 Q&A, needs Ames and Blanquart. Have never spoken to Ames.
+
+**Decided with Sergio: option 2.** Add planar base support to mjlab in the fork,
+rather than C1-specific workarounds or switching to a freejoint with constraints.
+
+**Mapped the full change surface.** Three greps:
+- `is_fixed_base`: 9 sites across entity.py, data.py, events.py
+- `free_joint_q_adr` / `_v_adr`: the real dependency, since that's what breaks
+- hardcoded qpos/qvel slices: none, mjlab is disciplined about going through
+  the address arrays
+
+Findings:
+- events.py needs **no changes**. All three sites raise for fixed-base non-mocap
+  entities and fall through to the normal path otherwise. Once `is_fixed_base`
+  is correct for planar, they work.
+- All the quaternion reads go through `root_link_quat_w`, which reads `xquat`,
+  so they already work.
+- `velocity_command.py:131` reads `free_joint_q_adr[3:7]` directly with no guard.
+  That one needs fixing and it's in the task I'm building on.
+- `commands.py:467-473` same problem in the tracking task. Skipping for now.
+
+So the surface is: entity.py (detection, enum, property, 3 branches),
+data.py (5 write methods), velocity_command.py (1 site).
+
+**Baseline test run before touching anything: 1131 passed, 2 failed** (the two
+known C1 failures). That's the regression check.
+
+**Design decisions so far:**
+- `RootType` enum with FIXED / FLOATING / PLANAR. `is_fixed_base` becomes a
+  derived property so the 9 existing call sites keep working.
+- New arrays `planar_q_adr` / `planar_v_adr` on `EntityIndexing`, alongside the
+  freejoint ones rather than replacing them.
+- Keep the external interface at 13-wide root state. Callers pass a full
+  pose+velocity; conversion happens inside the write methods. Lossy (discards
+  y, roll, yaw) but nothing downstream changes.
+- Root joints get classified by **role, not type**. Currently root_x/root_z/
+  root_phi land in `joint_q_adr` with the hips and knees, which is why
+  `num_joints` came back as 7.
+
+**Open question I stopped on:** whether to support XY and YZ planes or only XZ.
+Supporting all three means three conversion paths (pitch/yaw/roll) and I can
+only test one. Leaning toward XZ only, with a clear error for the others.
+
+**Unfinished:** the detection block. Got as far as a lookup keyed by
+(joint type, axis) but the structure isn't right yet, and I haven't written the
+branch that decides FIXED vs FLOATING vs PLANAR before building the arrays.
+
+**Verified from the model:** slide is type 2, hinge is type 3. root_x is
+[1,0,0], root_z is [0,0,1], root_phi is [0,1,0]. All four leg joints are also
+hinges about y, so axis alone doesn't identify base joints; membership in the
+root body's joints does.
+
+**Still outstanding from last week:** armature and gains were never updated to
+the manufacturer's 1.262 kg·cm². Should be 0.0485, k_p 191.7, k_d 12.2.

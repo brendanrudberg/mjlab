@@ -48,6 +48,12 @@ _OPTION_FIELDS = (
   "wind",
 )
 
+_PLANAR_XZ_PATTERN = (
+  (mujoco.mjtJoint.mjJNT_SLIDE, (1.0, 0.0, 0.0)),
+  (mujoco.mjtJoint.mjJNT_SLIDE, (0.0, 0.0, 1.0)),
+  (mujoco.mjtJoint.mjJNT_HINGE, (0.0, 1.0, 0.0)),
+)
+
 
 def non_default_option_fields(opt: mujoco._specs.MjOption) -> list[str]:
   """Return option field names that differ from MjSpec defaults."""
@@ -172,6 +178,9 @@ def auto_wrap_fixed_base_mocap(
     if free_joint is not None:
       return original_spec  # Floating-base, no wrapping needed.
 
+    if get_planar_joints(original_spec) is not None:
+      return original_spec  # Planar-base robot, no wrapping needed.
+
     # Check if root body is already mocap.
     root_body = original_spec.bodies[1] if len(original_spec.bodies) > 1 else None
     if root_body and root_body.mocap:
@@ -220,6 +229,21 @@ def get_free_joint(spec: mujoco.MjSpec) -> mujoco.MjsJoint | None:
       break
   return joint
 
+def get_planar_joints(spec: mujoco.MjSpec) -> tuple | None:
+  """Return the root body's joints ordered (x, z, pitch) if they form an
+  XZ-planar base, else None."""
+  root_joints = list(spec.bodies[1].joints) if len(spec.bodies) > 1 else []
+  if len(root_joints) != 3:
+    return None
+  by_key = {}
+  for j in root_joints:
+    axis = np.asarray(j.axis, dtype=float)
+    axis = axis / np.linalg.norm(axis)
+    key = (j.type, tuple(round(float(a), 6) for a in axis))
+    by_key[key] = j
+  if set(by_key) != set(_PLANAR_XZ_PATTERN):
+    return None
+  return tuple(by_key[k] for k in _PLANAR_XZ_PATTERN)
 
 def is_joint_limited(jnt: mujoco.MjsJoint) -> bool:
   """Returns True if a joint is limited."""

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Sequence
 
 import mujoco_warp as mjwarp
 import torch
+import enum
 
 from mjlab.utils.lab_api.math import (
   quat_apply,
@@ -30,6 +31,10 @@ def compute_velocity_from_cvel(
   ang_vel_w = ang_vel_c
   return torch.cat([lin_vel_w, ang_vel_w], dim=-1)
 
+class RootType(enum.Enum):
+  FIXED = "fixed"
+  PLANAR = "planar"
+  FLOATING = "floating"
 
 @dataclass
 class EntityData:
@@ -57,6 +62,7 @@ class EntityData:
   gravity_vec_w: torch.Tensor
   forward_vec_b: torch.Tensor
 
+  root_type: RootType
   is_fixed_base: bool
   is_articulated: bool
   is_actuated: bool
@@ -100,7 +106,14 @@ class EntityData:
     assert pose.shape[-1] == self.ROOT_POSE_DIM
 
     env_ids = self._resolve_env_ids(env_ids)
-    self.data.qpos[env_ids, self.indexing.free_joint_q_adr] = pose
+    if self.root_type == RootType.FLOATING:
+      self.data.qpos[env_ids, self.indexing.free_joint_q_adr] = pose
+    
+    elif self.root_type == RootType.PLANAR:
+        _, pitch, _ = euler_xyz_from_quat(pose[:, 3:7])
+        planar = torch.stack([pose[:, 0], pose[:, 2], pitch], dim=-1)
+        self.data.qpos[env_ids, self.indexing.planar_q_adr] = planar
+
 
   def write_root_velocity(
     self, velocity: torch.Tensor, env_ids: torch.Tensor | slice | None = None
@@ -259,8 +272,6 @@ class EntityData:
     """Return a generalized-force field sliced to this entity's joint DoFs."""
     field = getattr(self.data, field_name)
     return field[:, self.indexing.joint_v_adr]
-
-  # Root properties
 
   @property
   def root_link_pose_w(self) -> torch.Tensor:

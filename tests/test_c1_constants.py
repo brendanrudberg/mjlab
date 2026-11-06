@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from mjlab.asset_zoo.robots.caltech_c1 import c1_constants
-from mjlab.entity import Entity
+from mjlab.entity import Entity, RootType
 from mjlab.utils.string import resolve_expr
 
 
@@ -115,9 +115,10 @@ def test_collision_geom_count(c1_model) -> None:
 
 def test_c1_entity_creation(c1_entity) -> None:
   assert c1_entity.num_actuators == 4
-  assert c1_entity.num_joints == 7
+  assert c1_entity.num_joints == 4
   assert c1_entity.is_actuated
   assert not c1_entity.is_fixed_base
+  assert c1_entity.root_type == RootType.PLANAR
 
 
 def test_c1_actuators_configured_correctly(c1_model):

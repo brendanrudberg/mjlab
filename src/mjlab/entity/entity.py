@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import warnings
+import enum
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
@@ -14,17 +15,16 @@ from mjlab import actuator
 from mjlab.actuator import BuiltinActuatorGroup, FusedActuatorGroup
 from mjlab.actuator.actuator import TransmissionType
 from mjlab.actuator.xml_actuator import XmlActuator
-from mjlab.entity.data import EntityData
+from mjlab.entity.data import EntityData, RootType
 from mjlab.utils import spec_config as spec_cfg
 from mjlab.utils.lab_api.string import resolve_matching_names
 from mjlab.utils.mujoco import dof_width, qpos_width
-from mjlab.utils.spec import auto_wrap_fixed_base_mocap
+from mjlab.utils.spec import auto_wrap_fixed_base_mocap, get_planar_joints
 from mjlab.utils.string import resolve_expr
 from mjlab.utils.xml import fix_spec_xml, strip_buffer_textures
 
 if TYPE_CHECKING:
   from mjlab.entity.variants import VariantMetadata
-
 
 @dataclass(frozen=False)
 class EntityIndexing:
@@ -185,22 +185,33 @@ class Entity:
   def _identify_joints(self) -> None:
     self._all_joints = self._spec.joints
     self._free_joint = None
+    self._planar_joints: tuple = ()
+    self._root_type = RootType.FIXED
     self._non_free_joints = tuple(self._all_joints)
 
     free_joints = [j for j in self._all_joints if j.type == mujoco.mjtJoint.mjJNT_FREE]
     if len(free_joints) > 1:
-      raise ValueError(
-        f"Entity spec has {len(free_joints)} freejoints. An Entity models a "
+      raise ValueError(f"Entity spec has {len(free_joints)} freejoints. An Entity models a "
         "single rigid- or articulated-body system with at most one freejoint, "
         "which serves as its root. Model each detached floating body as its own "
-        "entry in SceneCfg.entities instead."
-      )
+        "entry in SceneCfg.entities instead.")
 
     if self._all_joints and self._all_joints[0].type == mujoco.mjtJoint.mjJNT_FREE:
       self._free_joint = self._all_joints[0]
       if not self._free_joint.name:
         self._free_joint.name = "floating_base_joint"
       self._non_free_joints = tuple(self._all_joints[1:])
+      self._root_type = RootType.FLOATING
+      return
+
+    planar_joints = get_planar_joints(self._spec)
+    if planar_joints is not None:
+      self._planar_joints = planar_joints
+      planar_names = {j.name for j in self._planar_joints}
+      self._non_free_joints = tuple(
+        j for j in self._all_joints if j.name not in planar_names
+      )
+      self._root_type = RootType.PLANAR
 
   def _apply_spec_editors(self) -> None:
     spec_cfg.warn_overlapping_geom_edits(
@@ -384,9 +395,13 @@ class Entity:
   # Attributes.
 
   @property
+  def root_type(self) -> RootType:
+    return self._root_type
+
+  @property
   def is_fixed_base(self) -> bool:
     """Entity is welded to the world."""
-    return self._free_joint is None
+    return self._root_type == RootType.FIXED
 
   @property
   def is_articulated(self) -> bool:
@@ -845,6 +860,7 @@ class Entity:
       soft_joint_pos_limits=soft_joint_pos_limits,
       gravity_vec_w=torch.tensor([0.0, 0.0, -1.0], device=device).repeat(nworld, 1),
       forward_vec_b=torch.tensor([1.0, 0.0, 0.0], device=device).repeat(nworld, 1),
+      root_type = self.root_type,
       is_fixed_base=self.is_fixed_base,
       is_articulated=self.is_articulated,
       is_actuated=self.is_actuated,
@@ -1280,6 +1296,28 @@ class Entity:
     joint_v_adr = []
     free_joint_q_adr = []
     free_joint_v_adr = []
+    planar_joint_q_adr = []
+    planar_joint_v_adr = []
+
+    root_joint_names = {j.name for j in self.root_body.joints} #get rid
+    if len(self.root_body.joints) == 3:
+      root_joint_list = [(2, (1, 0, 0)), (2, (0, 0, 1)), (3, (0, 1, 0))]
+      root_joints = {}
+      for joint in self.root_body.joints:
+        jnt = model.joint(joint.name)
+        jnt_type = jnt.type[0]
+        jnt_axis = jnt.axis
+        root_joints[(jnt_type, tuple(jnt_axis))] = jnt
+      if set(root_joints) != set(root_joint_list):
+        pass
+      for pair in root_joint_list:
+        jnt = root_joints[pair]
+        jnt_type = jnt.type[0]
+        vadr = jnt.dofadr[0]
+        qadr = jnt.qposadr[0]
+        planar_joint_v_adr.extend(range(vadr, vadr + dof_width(jnt_type)))
+        planar_joint_q_adr.extend(range(qadr, qadr + qpos_width(jnt_type)))
+
     for joint in self.spec.joints:
       jnt = model.joint(joint.name)
       jnt_type = jnt.type[0]
@@ -1288,6 +1326,9 @@ class Entity:
       if jnt_type == mujoco.mjtJoint.mjJNT_FREE:
         free_joint_v_adr.extend(range(vadr, vadr + 6))
         free_joint_q_adr.extend(range(qadr, qadr + 7))
+      elif joint.name in root_joint_names:
+        planar_joint_v_adr.extend(range(vadr, vadr + dof_width(jnt_type)))
+        planar_joint_q_adr.extend(range(qadr, qadr + qpos_width(jnt_type)))
       else:
         joint_v_adr.extend(range(vadr, vadr + dof_width(jnt_type)))
         joint_q_adr.extend(range(qadr, qadr + qpos_width(jnt_type)))
@@ -1295,6 +1336,9 @@ class Entity:
     joint_v_adr = torch.tensor(joint_v_adr, dtype=torch.int, device=device)
     free_joint_v_adr = torch.tensor(free_joint_v_adr, dtype=torch.int, device=device)
     free_joint_q_adr = torch.tensor(free_joint_q_adr, dtype=torch.int, device=device)
+    planar_joint_v_adr = torch.tensor(planar_joint_v_adr, dtype=torch.int, device=device)
+    planar_joint_q_adr = torch.tensor(planar_joint_q_adr, dtype=torch.int, device=device)
+
 
     if self.is_fixed_base and self.is_mocap:
       mocap_id = int(model.body_mocapid[self.root_body.id])
