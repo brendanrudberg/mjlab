@@ -108,11 +108,12 @@ class EntityData:
     env_ids = self._resolve_env_ids(env_ids)
     if self.root_type == RootType.FLOATING:
       self.data.qpos[env_ids, self.indexing.free_joint_q_adr] = pose
-    
     elif self.root_type == RootType.PLANAR:
-        _, pitch, _ = euler_xyz_from_quat(pose[:, 3:7])
-        planar = torch.stack([pose[:, 0], pose[:, 2], pitch], dim=-1)
-        self.data.qpos[env_ids, self.indexing.planar_q_adr] = planar
+      qw, qy = pose[:, 3], pose[:, 5]
+      pitch = 2.0 * torch.atan2(qy, qw)
+      pitch = torch.atan2(torch.sin(pitch), torch.cos(pitch))
+      planar = torch.stack([pose[:, 0], pose[:, 2], pitch], dim=-1)
+      self.data.qpos[env_ids, self.indexing.planar_joint_q_adr] = planar
 
 
   def write_root_velocity(
