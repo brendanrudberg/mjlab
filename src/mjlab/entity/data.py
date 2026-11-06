@@ -115,6 +115,35 @@ class EntityData:
       planar = torch.stack([pose[:, 0], pose[:, 2], pitch], dim=-1)
       self.data.qpos[env_ids, self.indexing.planar_joint_q_adr] = planar
 
+  def _root_quat_from_qpos(
+    self, env_ids: torch.Tensor | slice
+  ) -> torch.Tensor:
+    """Root orientation as (w, x, y, z), read from qpos (valid before forward())."""
+    if self.root_type == RootType.PLANAR:
+      pitch = self.data.qpos[env_ids, self.indexing.planar_joint_q_adr[2]]
+      zeros = torch.zeros_like(pitch)
+      return torch.stack(
+        [torch.cos(pitch / 2), zeros, torch.sin(pitch / 2), zeros], dim=-1
+      )
+    return self.data.qpos[env_ids, self.indexing.free_joint_q_adr[3:7]]
+
+  def _write_root_qvel(
+    self,
+    lin_vel_w: torch.Tensor,
+    ang_vel_w: torch.Tensor,
+    env_ids: torch.Tensor | slice,
+  ) -> None:
+    """Write world-frame root velocity into the root's qvel slots."""
+    if self.root_type == RootType.PLANAR:
+      planar = torch.stack(
+        [lin_vel_w[:, 0], lin_vel_w[:, 2], ang_vel_w[:, 1]], dim=-1
+      )
+      self.data.qvel[env_ids, self.indexing.planar_joint_v_adr] = planar
+    else:
+      quat_w = self._root_quat_from_qpos(env_ids)
+      ang_vel_b = quat_apply_inverse(quat_w, ang_vel_w)
+      qvel = torch.cat([lin_vel_w, ang_vel_b], dim=-1)
+      self.data.qvel[env_ids, self.indexing.free_joint_v_adr] = qvel
 
   def write_root_velocity(
     self, velocity: torch.Tensor, env_ids: torch.Tensor | slice | None = None
@@ -122,12 +151,8 @@ class EntityData:
     if self.is_fixed_base:
       raise ValueError("Cannot write root velocity for fixed-base entity.")
     assert velocity.shape[-1] == self.ROOT_VEL_DIM
-
     env_ids = self._resolve_env_ids(env_ids)
-    quat_w = self.data.qpos[env_ids, self.indexing.free_joint_q_adr[3:7]]
-    ang_vel_b = quat_apply_inverse(quat_w, velocity[:, 3:])
-    velocity_qvel = torch.cat([velocity[:, :3], ang_vel_b], dim=-1)
-    self.data.qvel[env_ids, self.indexing.free_joint_v_adr] = velocity_qvel
+    self._write_root_qvel(velocity[:, :3], velocity[:, 3:], env_ids)
 
   def write_root_velocity_b(
     self, velocity_b: torch.Tensor, env_ids: torch.Tensor | slice | None = None
@@ -140,13 +165,11 @@ class EntityData:
     if self.is_fixed_base:
       raise ValueError("Cannot write root velocity for fixed-base entity.")
     assert velocity_b.shape[-1] == self.ROOT_VEL_DIM
-
     env_ids = self._resolve_env_ids(env_ids)
-    quat_w = self.data.qpos[env_ids, self.indexing.free_joint_q_adr[3:7]]
+    quat_w = self._root_quat_from_qpos(env_ids)
     lin_vel_w = quat_apply(quat_w, velocity_b[:, :3])
-    # Free joint qvel holds world-frame linear and body-frame angular velocity.
-    velocity_qvel = torch.cat([lin_vel_w, velocity_b[:, 3:]], dim=-1)
-    self.data.qvel[env_ids, self.indexing.free_joint_v_adr] = velocity_qvel
+    ang_vel_w = quat_apply(quat_w, velocity_b[:, 3:])
+    self._write_root_qvel(lin_vel_w, ang_vel_w, env_ids)
 
   def write_root_com_velocity(
     self, velocity: torch.Tensor, env_ids: torch.Tensor | slice | None = None
