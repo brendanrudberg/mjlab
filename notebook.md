@@ -350,3 +350,123 @@ root body's joints does.
 
 **Still outstanding from last week:** armature and gains were never updated to
 the manufacturer's 1.262 kg·cm². Should be 0.0485, k_p 191.7, k_d 12.2.
+
+## 2026-11-05
+
+**Armature updated to manufacturer values.** MyActuator confirmed rotor inertia is
+1.262 kg·cm², rotor-side. Armature 0.0485 kg·m², k_p 191.6, k_d 12.2. The test
+parametrizes from the constants module, so it tracked the change automatically.
+Committed on its own before the framework work.
+
+**Planar base support implemented.** Built in the order classification ->
+plumbing -> writes, running the full suite at each green state.
+
+Classification:
+- `RootType` enum (FIXED / FLOATING / PLANAR). `is_fixed_base` now derived from it,
+  so its nine existing call sites mean "welded to the world" again.
+- `get_planar_joints` in `utils/spec.py`: matches the root body's joints against
+  slide-x, slide-z, hinge-y by type and normalized axis, returns them ordered
+  (x, z, pitch). Falls through to FIXED instead of raising, so fixed-base arms
+  hinged to the world keep their articulation.
+- First version classified the C1 as FIXED anyway. Cause: mjlab wraps every
+  entity without a freejoint in a `mocap_base` body at load, before classification
+  runs. `root_body` was the frozen wrapper, so every pose read was also pointing at
+  a body that never moves. Fix: planar pass-through in `auto_wrap_fixed_base_mocap`.
+
+Plumbing bugs hit along the way, all single-cause mass failures:
+- Removed the `is_fixed_base` field from `EntityData` -> ~400 TypeErrors.
+- A leftover `is_fixed_base` property in `EntityData` became the dataclass field's
+  default -> "non-default argument follows default argument."
+- `RootType` defined in both `entity.py` and `data.py`. Two enums with the same
+  members never compare equal, so every floating-base write silently did nothing
+  (17 failures). Kept one definition in `data.py`, re-exported from the package.
+
+Then:
+- Keyframe writer prepends (x, z, pitch) in the XML's declaration order. The old
+  writer put the leg angles into the base slots.
+- Indexing: `planar_joint_q_adr` / `v_adr`, base joints excluded from `joint_q_adr`.
+  This also fixed the observation leak: base joints had been counted as
+  articulation, so the policy would have observed its own world x position.
+- Pose writes extract pitch as `2*atan2(qy, qw)`, wrapped to (-pi, pi]. Not
+  `euler_xyz_from_quat`: its arcsine caps pitch at ±90°, which folds any flip.
+- Two velocity helpers: root orientation from qpos for either type, and the
+  world-frame qvel write. Planar needs no rotation since the base joints hang off
+  the world.
+- `velocity_command.py:131` reads orientation through the now-public helper.
+
+**Result:** 1131 passed, 2 failed, matching the pre-change baseline, then the two
+C1 keyframe failures fixed. New `tests/test_planar_base.py` pins pose writes at
+0.3, 2.0, and -2.5 rad and velocity writes that drop out-of-plane components.
+
+**Process note:** much of the debugging was done by pasting failures. Agreed to
+write my own guess at each cause before pasting.
+
+## 2026-11-06
+
+**C1 velocity task running.** The C1 config folder was a copy of the G1's and
+still registered the G1 env configs. Changes, about fifteen lines:
+- robot cfg, body name `base_link`, foot geoms, foot contact bodies
+- foot sites `left_foot_contact` / `right_foot_contact` (Diya's XML has them)
+- pose stds reduced to hip and knee
+- commands: `lin_vel_y` and `ang_vel_z` zeroed, heading off, heading range None
+- IMU observations swapped for ground-truth `base_lin_vel` / `base_ang_vel`;
+  `angular_momentum` reward dropped. Both read XML sensors the C1 doesn't have.
+- `rl_cfg` unchanged apart from `experiment_name`: PPO settings and network sizes
+  are robot-agnostic, and input/output dims are inferred from the env.
+
+Smoke run (64 envs, 5 iterations) passed after three config errors, then the full
+30k-iteration run started before the 3pm meeting. About 85 min on the lab PC.
+
+**Lessons:**
+- Mean reward alone is misleading here: `track_angular_velocity` at weight 2.0
+  pays out for free on a robot that can't yaw. Watch episode length and
+  `track_linear_velocity`.
+- SSH dropped mid-run. Long jobs go in tmux or nohup from now on.
+- `play --viewer viser` crashed on the zeroed command axes (slider min 0.1, value
+  0). Clamped `max_val` at the top of the GUI loop.
+
+**Meeting:** presented the planar implementation, the mocap and observation-leak
+findings, and the first run. Walking not yet confirmed.
+
+## 2026-11-08
+
+**Methods report drafted** in IEEEtran, matching the background report.
+- Overview: kept short; RL rationale reduced to a pointer to the earlier report.
+  Named the load quantities explicitly (peak joint torques, joint speeds, ground
+  reaction and impact forces).
+- Pipeline figure in draw.io, several iterations: design loop (solid) and hardware
+  loop (dashed, spring term). Test failures route to "update mechanical design" for
+  hardware failures and "system ID / update sim model" for behavior mismatch.
+  Exit from load extraction labeled "within limits" vs "exceeds limits."
+- Robot model section: armature and PD gain equations, ω_n = 2π·10 Hz, ζ = 2
+  justified by the armature counting only the rotor. Actuator table. Peak torque
+  120 N·m per MyActuator.
+- `figure*` can't land on the page it's defined on in two-column mode, so the
+  pipeline sits at the top of page 2.
+
+**Sim-to-real reading:** hardware fine-tuning exists (Smith et al. 2022) but is
+rare; on-policy PPO is impractical with one robot. The usual loop is system ID
+before deployment, then diagnose -> update the sim model -> retrain. The rail rig
+makes real-world fine-tuning more feasible than for a free-standing biped.
+
+**Final checkpoint (model_29999) reviewed:** did not learn to walk.
+
+**Render script** (`render_c1.py`): offscreen MuJoCo render over SSH with EGL,
+three-quarter camera, joint axes scaled down, white background via segmentation
+mask.
+
+**Two XML problems found while rendering:**
+- Leg zero poses asymmetric: right thigh exported ~24° forward of vertical, left
+  ~10° back, so identical joint angles gave legs splayed ~34° apart.
+- Base body at `pos="0 0 1.25"` plus the keyframe's `root_z = 0.76` put the base
+  at ~2.01 m. Every episode in the first run started with a ~1 m drop, which also
+  inflated impact forces.
+
+**Diya re-exported.** Legs now symmetric and straight at zero; base offset 0.2095 m
+and documented. But the actuator and keyframe blocks are back in the XML (the
+duplicate-actuator bug), base joints renamed `base_px/pz/phi`, foot sites moved to
+the sphere bottom, self-collision disabled. To do: strip the actuator and keyframe
+blocks, recompute `root_z` so both feet sit at z ≈ 0, rerun the C1 tests, retrain.
+
+**Also:** `get_c1_robot_cfg` had been renamed to `get_cfg` in an uncommitted edit,
+breaking every import. Restored from git.

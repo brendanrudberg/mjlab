@@ -60,6 +60,12 @@ def test_keyframe_base_position(c1_model) -> None:
   expected_pitch = 2.0 * np.arctan2(kf.rot[2], kf.rot[0])
   np.testing.assert_allclose(data.qpos[:3], [kf.pos[0], kf.pos[2], expected_pitch])
 
+def test_keyframe_feet_on_ground(c1_model) -> None:
+  data = mujoco.MjData(c1_model)
+  mujoco.mj_resetDataKeyframe(c1_model, data, c1_model.key("init_state").id)
+  mujoco.mj_forward(c1_model, data)
+  for site in ("left_foot_contact", "right_foot_contact"):
+    assert abs(data.site_xpos[c1_model.site(site).id][2]) < 0.01
 
 def test_keyframe_joint_positions(c1_entity, c1_model) -> None:
   """Test that keyframe joint positions match the configuration."""

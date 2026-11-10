@@ -196,6 +196,7 @@ class UniformVelocityCommand(CommandTerm):
       enabled = server.gui.add_checkbox("Enable", initial_value=False)
 
       for label, max_val in axes:
+        max_val = max(max_val, 0.1)  # zeroed axes (e.g. planar robots) still need a valid slider
         max_input = server.gui.add_slider(
           f"Max {label}",
           initial_value=max_val,
