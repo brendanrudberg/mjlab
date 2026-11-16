@@ -1,9 +1,12 @@
-"""Caltech C1 velocity environment configurations."""
+"""Caltech C1 velocity environment configurations.
 
-from mjlab.asset_zoo.robots import (
-  C1_ACTION_SCALE,
-  get_c1_robot_cfg,
-)
+Start with mjlab's shared velocity task and override C1-specific settings.
+Reward overrides are grouped by purpose; unspecified terms retain factory defaults.
+"""
+
+import math
+
+from mjlab.asset_zoo.robots import C1_ACTION_SCALE, get_c1_robot_cfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
@@ -23,31 +26,35 @@ from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 
 def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
-  """Create Caltech C1 rough terrain velocity configuration."""
+  """Create the C1 rough-terrain task with robot-specific overrides."""
   cfg = make_velocity_env_cfg()
+
+  base_body = "base_link"
+  foot_sites = ("left_foot_contact", "right_foot_contact")
+  foot_geoms = ("L_foot_geom", "R_foot_geom")
+
+  # ---------------------------------------------------------------------------
+  # Scene and simulation.
+  # ---------------------------------------------------------------------------
+  cfg.scene.entities = {"robot": get_c1_robot_cfg()}
+  cfg.viewer.body_name = base_body
 
   cfg.sim.mujoco.ccd_iterations = 500
   cfg.sim.contact_sensor_maxmatch = 500
   cfg.sim.nconmax = 70
 
-  cfg.scene.entities = {"robot": get_c1_robot_cfg()}
-
-  # Set raycast sensor frame to C1 base_link.
+  # ---------------------------------------------------------------------------
+  # Sensors: terrain observations, foot clearance/contact, and self-contact.
+  # ---------------------------------------------------------------------------
   for sensor in cfg.scene.sensors or ():
     if sensor.name == "terrain_scan":
       assert isinstance(sensor, RayCastSensorCfg)
       assert isinstance(sensor.frame, ObjRef)
-      sensor.frame.name = "base_link"
-
-  site_names = ("left_foot_contact", "right_foot_contact")
-  geom_names = ("L_foot_geom", "R_foot_geom")
-
-  # Wire foot height scan to per-foot sites.
-  for sensor in cfg.scene.sensors or ():
-    if sensor.name == "foot_height_scan":
+      sensor.frame.name = base_body
+    elif sensor.name == "foot_height_scan":
       assert isinstance(sensor, TerrainHeightSensorCfg)
       sensor.frame = tuple(
-        ObjRef(type="site", name=s, entity="robot") for s in site_names
+        ObjRef(type="site", name=site, entity="robot") for site in foot_sites
       )
       sensor.pattern = RingPatternCfg.single_ring(radius=0.03, num_samples=6)
 
@@ -66,8 +73,8 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   self_collision_cfg = ContactSensorCfg(
     name="self_collision",
-    primary=ContactMatch(mode="subtree", pattern="base_link", entity="robot"),
-    secondary=ContactMatch(mode="subtree", pattern="base_link", entity="robot"),
+    primary=ContactMatch(mode="subtree", pattern=base_body, entity="robot"),
+    secondary=ContactMatch(mode="subtree", pattern=base_body, entity="robot"),
     fields=("found", "force"),
     reduce="none",
     num_slots=1,
@@ -78,69 +85,104 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     self_collision_cfg,
   )
 
-  if cfg.scene.terrain is not None and cfg.scene.terrain.terrain_generator is not None:
-    cfg.scene.terrain.terrain_generator.curriculum = True
-
+  # ---------------------------------------------------------------------------
+  # Agent interface: joint-position actions and ground-truth base observations.
+  # ---------------------------------------------------------------------------
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
   joint_pos_action.scale = C1_ACTION_SCALE
 
-  cfg.viewer.body_name = "base_link"
-
-  twist_cmd = cfg.commands["twist"]
-  assert isinstance(twist_cmd, UniformVelocityCommandCfg)
-  twist_cmd.viz.z_offset = 0.9
-  twist_cmd.ranges.lin_vel_y = (0.0, 0.0)
-  twist_cmd.ranges.ang_vel_z = (0.0, 0.0)
-  twist_cmd.heading_command = False
-  twist_cmd.ranges.heading = None
-
-  cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
-  cfg.events["base_com"].params["asset_cfg"].body_names = ("base_link",)
-
-  cfg.rewards["pose"].params["std_standing"] = {".*": 0.05}
-  cfg.rewards["pose"].params["std_walking"] = {
-    r".*hip.*": 0.3,
-    r".*knee.*": 0.35,
-  }
-  cfg.rewards["pose"].params["std_running"] = {
-    r".*hip.*": 0.5,
-    r".*knee.*": 0.6,
-  }
-
-  cfg.rewards["upright"].params["asset_cfg"].body_names = ("base_link",)
-  cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("base_link",)
-
-  for reward_name in ["foot_clearance", "foot_slip"]:
-    cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
-
-  cfg.rewards["body_ang_vel"].weight = -0.05
-  cfg.rewards.pop("angular_momentum", None)
-  cfg.rewards["air_time"].weight = 0.0
-
-  cfg.rewards["self_collisions"] = RewardTermCfg(
-    func=mdp.self_collision_cost,
-    weight=-1.0,
-    params={"sensor_name": self_collision_cfg.name, "force_threshold": 10.0},
-  )
-
-    # No IMU sensors in the C1 XML yet: use ground-truth base velocities.
+  # The C1 XML has no IMU sensors yet.
   imu_replacements = {
     "robot/imu_lin_vel": envs_mdp.base_lin_vel,
     "robot/imu_ang_vel": envs_mdp.base_ang_vel,
   }
   for group in ("actor", "critic"):
     for term in cfg.observations[group].terms.values():
-      sensor = (term.params or {}).get("sensor_name")
-      if sensor in imu_replacements:
-        term.func = imu_replacements[sensor]
+      sensor_name = (term.params or {}).get("sensor_name")
+      if sensor_name in imu_replacements:
+        term.func = imu_replacements[sensor_name]
         term.params = {}
-  # Apply play mode overrides.
 
+  # ---------------------------------------------------------------------------
+  # Commands and curricula: forward motion with increasing target speed.
+  # ---------------------------------------------------------------------------
+  twist_cmd = cfg.commands["twist"]
+  assert isinstance(twist_cmd, UniformVelocityCommandCfg)
+  twist_cmd.viz.z_offset = 0.9
+  twist_cmd.ranges.lin_vel_x = (0.3, 1.0)
+  twist_cmd.ranges.lin_vel_y = (0.0, 0.0)
+  twist_cmd.ranges.ang_vel_z = (0.0, 0.0)
+  twist_cmd.heading_command = False
+  twist_cmd.ranges.heading = None
+  twist_cmd.rel_standing_envs = 0.0
+
+  cfg.curriculum["command_vel"].params["velocity_stages"] = [
+    {"step": 0, "lin_vel_x": (0.3, 1.0)},
+    {"step": 5000 * 24, "lin_vel_x": (0.3, 1.5)},
+  ]
+  if cfg.scene.terrain is not None and cfg.scene.terrain.terrain_generator is not None:
+    cfg.scene.terrain.terrain_generator.curriculum = True
+
+  # ---------------------------------------------------------------------------
+  # Rewards: retain inherited terms and tune only the C1-specific overrides.
+  # ---------------------------------------------------------------------------
+  rewards = cfg.rewards
+
+  # 1. Task objective: track the commanded linear velocity.
+  # Keep the factory's track_linear_velocity term unchanged.
+  # Preserve the existing choice to omit direct yaw-rate tracking.
+  rewards.pop("track_angular_velocity", None)
+  rewards["track_linear_velocity"].params["std"] = 0.25
+
+  # 2. Posture and stability: stay upright and limit body rotation.
+  rewards["upright"].weight = 0.3
+  rewards["upright"].params["asset_cfg"].body_names = (base_body,)
+
+  rewards["body_ang_vel"].weight = -0.05
+  rewards["body_ang_vel"].params["asset_cfg"].body_names = (base_body,)
+
+  # Allow more joint deviation as commanded speed increases.
+  cfg.rewards["pose"].weight = 0.2
+  rewards["pose"].params["std_standing"] = {".*": 0.05}
+  rewards["pose"].params["std_walking"] = {
+    r".*hip.*": 0.3,
+    r".*knee.*": 0.35,
+  }
+  rewards["pose"].params["std_running"] = {
+    r".*hip.*": 0.5,
+    r".*knee.*": 0.6,
+  }
+  rewards.pop("angular_momentum", None)
+
+  # 3. Gait and ground contact: air time, foot clearance, and slip.
+  rewards["air_time"].weight = 1
+  rewards["air_time"].params["command_threshold"] = 0.1
+
+  for reward_name in ("foot_clearance", "foot_slip"):
+    rewards[reward_name].params["asset_cfg"].site_names = foot_sites
+
+  cfg.rewards["foot_slip"].weight = -1.0
+
+  # 4. Regularization and collision avoidance.
+  # Keep inherited dof_pos_limits and action_rate_l2 settings unchanged.
+  rewards["self_collisions"] = RewardTermCfg(
+    func=mdp.self_collision_cost,
+    weight=-1.0,
+    params={"sensor_name": self_collision_cfg.name, "force_threshold": 10.0},
+  )
+
+  # ---------------------------------------------------------------------------
+  # Domain randomization: bind inherited events to C1 geometry and bodies.
+  # ---------------------------------------------------------------------------
+  cfg.events["foot_friction"].params["asset_cfg"].geom_names = foot_geoms
+  cfg.events["base_com"].params["asset_cfg"].body_names = (base_body,)
+
+  # ---------------------------------------------------------------------------
+  # Play mode: long episodes, clean observations, and randomized terrain resets.
+  # ---------------------------------------------------------------------------
   if play:
-    # Effectively infinite episode length.
     cfg.episode_length_s = int(1e9)
-
     cfg.observations["actor"].enable_corruption = False
     cfg.events.pop("push_robot", None)
     cfg.terminations.pop("out_of_terrain_bounds", None)
@@ -162,35 +204,30 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
 
 def caltech_c1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
-  """Create Caltech C1 flat terrain velocity configuration."""
+  """Derive the flat-terrain task from the shared C1 rough configuration."""
   cfg = caltech_c1_rough_env_cfg(play=play)
 
+  # Simulation overrides for flat terrain.
   cfg.sim.njmax = 300
   cfg.sim.mujoco.ccd_iterations = 50
   cfg.sim.contact_sensor_maxmatch = 64
   cfg.sim.nconmax = None
 
-  # Switch to flat terrain.
+  # Replace generated terrain with a plane.
   assert cfg.scene.terrain is not None
   cfg.scene.terrain.terrain_type = "plane"
   cfg.scene.terrain.terrain_generator = None
 
-  # Remove raycast sensor and height scan (no terrain to scan).
+  # Remove terrain_scan and its observations; retain foot_height_scan.
   cfg.scene.sensors = tuple(
-    s for s in (cfg.scene.sensors or ()) if s.name != "terrain_scan"
+    sensor for sensor in (cfg.scene.sensors or ()) if sensor.name != "terrain_scan"
   )
   del cfg.observations["actor"].terms["height_scan"]
   del cfg.observations["critic"].terms["height_scan"]
 
+  # Flat-terrain termination and curriculum overrides.
   cfg.terminations.pop("out_of_terrain_bounds", None)
-
-  # Disable terrain curriculum (not present in play mode since rough clears all).
+  cfg.terminations["fell_over"].params["limit_angle"] = math.radians(35.0)
   cfg.curriculum.pop("terrain_levels", None)
-
-  if play:
-    twist_cmd = cfg.commands["twist"]
-    assert isinstance(twist_cmd, UniformVelocityCommandCfg)
-    twist_cmd.ranges.lin_vel_x = (-1.5, 2.0)
-    twist_cmd.ranges.ang_vel_z = (-0.7, 0.7)
 
   return cfg

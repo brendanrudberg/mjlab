@@ -128,7 +128,7 @@ class UniformVelocityCommand(CommandTerm):
         # Resolve standing, heading and world-frame envs so the command read below
         # is the one they will receive. Derived kinematics are stale here, so the
         # heading comes from qpos.
-        quat_w = self.robot.data.root_quat_from_qpos(env_ids)
+        quat_w = self.robot.data.root_quat_from_qpos(slice(None))
         forward_w = quat_apply(quat_w, self.robot.data.forward_vec_b)
         heading_w = torch.atan2(forward_w[:, 1], forward_w[:, 0])
         self._resolve_command(heading_w, init_ids)

@@ -64,6 +64,7 @@ class EntityIndexing:
   free_joint_v_adr: torch.Tensor
   planar_joint_q_adr: torch.Tensor
   planar_joint_v_adr: torch.Tensor
+  planar_rest_pos: torch.Tensor
 
   @property
   def root_body_id(self) -> int:
@@ -397,13 +398,19 @@ class Entity:
       self.root_body.quat[:] = self.cfg.init_state.rot
 
   def _planar_init_qpos(self) -> np.ndarray:
-    """Base qpos for a planar root, in the XML's declaration order."""
+    """Base qpos for a planar root, in the XML's declaration order.
+
+    init_state.pos is the world position of the base frame, matching floating
+    bases. Slide joints measure from the body's rest position, so subtract it.
+    """
     x, _, z = self.cfg.init_state.pos
+    rest = self.root_body.pos
     w, qx, qy, qz = self.cfg.init_state.rot
     pitch = 2.0 * np.arctan2(qy, w)  # exact for a pure rotation about y
+    pitch = np.arctan2(np.sin(pitch), np.cos(pitch))  # wrap to (-pi, pi]
     by_name = dict(zip(
       (j.name for j in self._planar_joints),  # ordered (x, z, pitch)
-      (x, z, pitch),
+      (x - rest[0], z - rest[2], pitch),
     ))
     return np.array([by_name[j.name] for j in self.root_body.joints])
 
@@ -1314,6 +1321,14 @@ class Entity:
     planar_joint_q_adr = []
     planar_joint_v_adr = []
 
+    if self._planar_joints:
+      root_id = self.root_body.id
+      planar_rest_pos = torch.tensor(
+        model.body_pos[root_id], dtype=torch.float, device=device
+      )  # [3], base body rest position in the world
+    else:
+      planar_rest_pos = torch.zeros(3, dtype=torch.float, device=device)
+
     # Planar base addresses, in (x, z, pitch) order.
     planar_joint_names = {j.name for j in self._planar_joints}
     for joint in self._planar_joints:
@@ -1381,6 +1396,7 @@ class Entity:
       free_joint_v_adr=free_joint_v_adr,
       planar_joint_q_adr=planar_joint_q_adr,
       planar_joint_v_adr=planar_joint_v_adr,
+      planar_rest_pos=planar_rest_pos,
     )
 
   def _apply_actuator_controls(self) -> None:

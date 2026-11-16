@@ -109,10 +109,13 @@ class EntityData:
     if self.root_type == RootType.FLOATING:
       self.data.qpos[env_ids, self.indexing.free_joint_q_adr] = pose
     elif self.root_type == RootType.PLANAR:
+      rest = self.indexing.planar_rest_pos  # [3]
       qw, qy = pose[:, 3], pose[:, 5]
       pitch = 2.0 * torch.atan2(qy, qw)
       pitch = torch.atan2(torch.sin(pitch), torch.cos(pitch))
-      planar = torch.stack([pose[:, 0], pose[:, 2], pitch], dim=-1)
+      planar = torch.stack(
+        [pose[:, 0] - rest[0], pose[:, 2] - rest[2], pitch], dim=-1
+      )
       self.data.qpos[env_ids, self.indexing.planar_joint_q_adr] = planar
 
   def root_quat_from_qpos(

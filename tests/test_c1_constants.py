@@ -57,8 +57,11 @@ def test_keyframe_base_position(c1_model) -> None:
   mujoco.mj_resetDataKeyframe(c1_model, data, 0)
   mujoco.mj_forward(c1_model, data)
   kf = c1_constants.KNEES_BENT_KEYFRAME
+  rest = c1_model.body("base_link").pos
   expected_pitch = 2.0 * np.arctan2(kf.rot[2], kf.rot[0])
-  np.testing.assert_allclose(data.qpos[:3], [kf.pos[0], kf.pos[2], expected_pitch])
+  np.testing.assert_allclose(
+    data.qpos[:3], [kf.pos[0] - rest[0], kf.pos[2] - rest[2], expected_pitch]
+  )
 
 def test_keyframe_feet_on_ground(c1_model) -> None:
   data = mujoco.MjData(c1_model)

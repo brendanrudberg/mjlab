@@ -77,10 +77,10 @@ HOME_KEYFRAME = EntityCfg.InitialStateCfg(
 )
 
 KNEES_BENT_KEYFRAME = EntityCfg.InitialStateCfg(
-  pos=(0, 0, 0.823),
+  pos=(0.0, 0.0, 1.0226),
   joint_pos={
-    ".*_hip_joint": -0.3,
-    ".*_knee_joint": 0.7,
+    "L_hip_joint": -0.55, "L_knee_joint": 0.60,
+    "R_hip_joint": -0.10, "R_knee_joint": 0.63,
   },
   joint_vel={".*": 0.0},
 )
@@ -141,7 +141,7 @@ def get_c1_robot_cfg() -> EntityCfg:
   """
   return EntityCfg(
     init_state=KNEES_BENT_KEYFRAME,
-    collisions=(FULL_COLLISION,),
+    collisions=(FULL_COLLISION_WITHOUT_SELF,),
     spec_fn=get_spec,
     articulation=C1_ARTICULATION,
   )
