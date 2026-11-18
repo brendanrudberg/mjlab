@@ -20,6 +20,8 @@ from mjlab.sensor import (
   RingPatternCfg,
   TerrainHeightSensorCfg,
 )
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
@@ -30,6 +32,7 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg = make_velocity_env_cfg()
 
   base_body = "base_link"
+
   foot_sites = ("left_foot_contact", "right_foot_contact")
   foot_geoms = ("L_foot_geom", "R_foot_geom")
 
@@ -104,6 +107,12 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         term.func = imu_replacements[sensor_name]
         term.params = {}
 
+  for group in ("actor", "critic"):
+    cfg.observations[group].terms["gait_phase"] = ObservationTermCfg(
+      func=mdp.gait_phase, params={"period": 0.8}
+    )
+  
+
   # ---------------------------------------------------------------------------
   # Commands and curricula: forward motion with increasing target speed.
   # ---------------------------------------------------------------------------
@@ -133,7 +142,13 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # Keep the factory's track_linear_velocity term unchanged.
   # Preserve the existing choice to omit direct yaw-rate tracking.
   rewards.pop("track_angular_velocity", None)
-  rewards["track_linear_velocity"].params["std"] = 0.25
+  w = rewards["track_linear_velocity"].weight
+  rewards.pop("track_linear_velocity")
+  rewards["track_smoothed_linear_velocity"] = RewardTermCfg(
+    func=mdp.track_smoothed_linear_velocity,
+    weight=w,
+    params={"command_name": "twist", "std": 0.5, "alpha": 0.025},
+  )
 
   # 2. Posture and stability: stay upright and limit body rotation.
   rewards["upright"].weight = 0.3
@@ -156,8 +171,7 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   rewards.pop("angular_momentum", None)
 
   # 3. Gait and ground contact: air time, foot clearance, and slip.
-  rewards["air_time"].weight = 1
-  rewards["air_time"].params["command_threshold"] = 0.1
+  rewards.pop("air_time", None)
 
   for reward_name in ("foot_clearance", "foot_slip"):
     rewards[reward_name].params["asset_cfg"].site_names = foot_sites
@@ -172,11 +186,36 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={"sensor_name": self_collision_cfg.name, "force_threshold": 10.0},
   )
 
+  # 5. Foots swapping position between steps.
+  # Custom function in rewards.py
+  rewards["forward_step"] = RewardTermCfg(
+    func=mdp.forward_step,
+    weight=50.0,
+    params={
+      "sensor_name": "feet_ground_contact",
+      "command_name": "twist",
+      "min_step": 0.05,
+      "asset_cfg": SceneEntityCfg("robot", site_names=foot_sites),
+    },
+  )
+
+  # 6. Reward for following
+  rewards["gait_contact"] = RewardTermCfg(
+    func=mdp.gait_contact,
+    weight=1.0,
+    params={
+      "sensor_name": "feet_ground_contact",
+      "command_name": "twist",
+      "period": 0.8,
+      "stance_frac": 0.6,
+    },
+  )
   # ---------------------------------------------------------------------------
   # Domain randomization: bind inherited events to C1 geometry and bodies.
   # ---------------------------------------------------------------------------
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = foot_geoms
   cfg.events["base_com"].params["asset_cfg"].body_names = (base_body,)
+  cfg.events["reset_base"].params["velocity_range"]["x"] = (0.0, 0.6)
 
   # ---------------------------------------------------------------------------
   # Play mode: long episodes, clean observations, and randomized terrain resets.

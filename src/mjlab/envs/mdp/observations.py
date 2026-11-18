@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import math
 import torch
 
 from mjlab.entity import Entity
@@ -161,3 +162,14 @@ def height_scan(
 
   miss_mask = data.distances < 0
   return torch.where(miss_mask, torch.full_like(heights, miss_value), heights)
+
+
+##
+# Gait clock. 
+##
+
+
+def gait_phase(env: ManagerBasedRlEnv, period: float = 0.8) -> torch.Tensor:
+  t = env.episode_length_buf.float() * env.step_dt
+  phase = 2.0 * math.pi * torch.remainder(t / period, 1.0)
+  return torch.stack([torch.sin(phase), torch.cos(phase)], dim=-1)  # [B, 2]

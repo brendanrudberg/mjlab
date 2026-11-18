@@ -386,6 +386,159 @@ def soft_landing(
       cost = cost * active
   return cost
 
+class forward_step:
+  """Pay a touchdown only if it lands past the furthest previous touchdown
+  (along the command direction) and is the opposite foot from the last paid one."""
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    B, dev = env.num_envs, env.device
+    self.best = torch.zeros(B, device=dev)
+    self.last = torch.full((B,), -1, dtype=torch.long, device=dev)
+    self.init = torch.zeros(B, dtype=torch.bool, device=dev)
+    self.prev_dir = torch.zeros(B, device=dev)
+    self.idx = torch.arange(2, device=dev).unsqueeze(0)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    sensor_name: str,
+    command_name: str,
+    min_step: float = 0.05,
+    command_threshold: float = 0.1,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    contact: ContactSensor = env.scene[sensor_name]
+    command = env.command_manager.get_command(command_name)
+    assert command is not None and contact.data.found is not None
+
+    first_contact = contact.compute_first_contact(dt=env.step_dt)  # [B, 2]
+    in_contact = contact.data.found > 0  # [B, 2]
+    foot_x = asset.data.site_pos_w[:, asset_cfg.site_ids, 0]  # [B, 2]
+
+    # Command direction flipped: forget the mark and start over.
+    d = torch.sign(command[:, 0])
+    self.init &= d == self.prev_dir
+    self.prev_dir = d.clone()
+    self.last = torch.where(self.init, self.last, torch.full_like(self.last, -1))
+
+    sx = foot_x * d.unsqueeze(1)  # progress coordinate
+    neg_inf = torch.full_like(sx, -torch.inf)
+    ok = (
+      first_contact
+      & (sx > (self.best + min_step).unsqueeze(1))
+      & (self.idx != self.last.unsqueeze(1))
+      & self.init.unsqueeze(1)
+    )
+    paid = ok.any(dim=1)
+    top, foot = torch.where(ok, sx, neg_inf).max(dim=1)
+    self.best = torch.where(paid, top, self.best)
+    self.last = torch.where(paid, foot, self.last)
+
+    # First ground contact after a reset sets the mark at the leading foot.
+    new = ~self.init & in_contact.any(dim=1)
+    ground = torch.where(in_contact, sx, neg_inf).max(dim=1).values
+    self.best = torch.where(new, ground, self.best)
+    self.init |= new
+
+    active = (torch.abs(command[:, 0]) > command_threshold).float()
+
+    self.count = getattr(self, "count", 0) + int(paid.sum())
+    return paid.float() * active
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    if env_ids is None:
+      env_ids = slice(None)
+    self.init[env_ids] = False
+    self.last[env_ids] = -1
+
+class swing_foot_forward:
+  """While exactly one foot is on the ground, pay the swing foot's velocity
+  along the command direction. Backward swing is negative, so pumping nets zero."""
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    self.prev_x = torch.zeros((env.num_envs, 2), device=env.device)
+    self.fresh = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    sensor_name: str,
+    command_name: str,
+    max_vel: float = 1.5,
+    command_threshold: float = 0.1,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    contact: ContactSensor = env.scene[sensor_name]
+    command = env.command_manager.get_command(command_name)
+    assert command is not None and contact.data.found is not None
+
+    foot_x = asset.data.site_pos_w[:, asset_cfg.site_ids, 0]  # [B, 2]
+    vel = (foot_x - self.prev_x) / env.step_dt
+    vel[self.fresh] = 0.0  # no velocity spike from the reset teleport
+    self.prev_x = foot_x.clone()
+    self.fresh[:] = False
+
+    in_contact = contact.data.found > 0
+    single = (in_contact.sum(dim=1) == 1).float()
+    d = torch.sign(command[:, 0]).unsqueeze(1)
+    swing_vel = torch.clamp(vel * d, -max_vel, max_vel) * (~in_contact).float()
+    active = (torch.abs(command[:, 0]) > command_threshold).float()
+    return swing_vel.sum(dim=1) * single * active
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    if env_ids is None:
+      env_ids = slice(None)
+    self.fresh[env_ids] = True
+
+class track_smoothed_linear_velocity:
+  """Track the commanded forward speed using an exponential moving average of
+  world-frame base vx, so oscillating in place averages to zero and earns nothing."""
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    self.avg_vx = torch.zeros(env.num_envs, device=env.device)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    std: float = 0.5,
+    alpha: float = 0.025,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    assert command is not None
+    vx = asset.data.root_link_lin_vel_w[:, 0]
+    self.avg_vx = (1.0 - alpha) * self.avg_vx + alpha * vx
+    error = command[:, 0] - self.avg_vx
+    return torch.exp(-torch.square(error) / std**2)
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    if env_ids is None:
+      env_ids = slice(None)
+    self.avg_vx[env_ids] = 0.0
+
+def gait_contact(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  command_name: str,
+  period: float = 0.8,
+  stance_frac: float = 0.6,
+  command_threshold: float = 0.1,
+) -> torch.Tensor:
+  contact: ContactSensor = env.scene[sensor_name]
+  command = env.command_manager.get_command(command_name)
+  assert contact.data.found is not None and command is not None
+  in_contact = contact.data.found > 0  # [B, 2]
+  t = env.episode_length_buf.float() * env.step_dt
+  phase = torch.remainder(t / period, 1.0)
+  leg_phase = torch.stack([phase, torch.remainder(phase + 0.5, 1.0)], dim=-1)
+  stance = leg_phase < stance_frac  # where each foot should be down
+  match = (in_contact == stance).float().mean(dim=1)  # 0, 0.5 or 1
+  active = (torch.abs(command[:, 0]) > command_threshold).float()
+  return match * active
 
 class variable_posture:
   """Penalize deviation from default pose with speed-dependent tolerance.

@@ -45,3 +45,5 @@ with torch.inference_mode():
 survived = (falls == 0).float().mean().item()
 print(f"survived all {steps} steps: {survived:.0%}   mean falls per env: {falls.mean().item():.2f}")
 print(f"mean |cmd - vx|: {(vel_err / steps).mean().item():.3f} m/s")
+term = env.unwrapped.reward_manager._term_cfgs[env.unwrapped.reward_manager._term_names.index("forward_step")].func
+print(f"paid steps: {term.count} over 64 envs, {term.count / 64:.1f} per env")

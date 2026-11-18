@@ -77,10 +77,10 @@ HOME_KEYFRAME = EntityCfg.InitialStateCfg(
 )
 
 KNEES_BENT_KEYFRAME = EntityCfg.InitialStateCfg(
-  pos=(0.0, 0.0, 1.0226),
+  pos=(0.0, 0.0, 1.0124),
   joint_pos={
-    "L_hip_joint": -0.55, "L_knee_joint": 0.60,
-    "R_hip_joint": -0.10, "R_knee_joint": 0.63,
+    "L_hip_joint": -0.498, "L_knee_joint": 0.80,
+    "R_hip_joint": -0.498, "R_knee_joint": 0.80,
   },
   joint_vel={".*": 0.0},
 )

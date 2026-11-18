@@ -470,3 +470,138 @@ blocks, recompute `root_z` so both feet sit at z ≈ 0, rerun the C1 tests, retr
 
 **Also:** `get_c1_robot_cfg` had been renamed to `get_cfg` in an uncommitted edit,
 breaking every import. Restored from git.
+
+## 2026-11-10
+
+**Missed 12 pm 1:1 with Sergio.** Thought 1:1s had moved to Friday. Messaged,
+rescheduled to 4 pm the same day, confirmed 1:1s stay on Tuesdays per #planar-robot.
+
+**Spawn height fixed.** Robot was dropping from ~2 m: the XML put `base_link` at
+z = 1.25 and the keyframe added 0.76 on top. Diya's re-export moved the base body to
+z = 0.2095 with straight, symmetric legs at zero angles (the old export had the
+thighs built at different angles). Committed as "XML starting from correct height"
+(550f4e0). Started a new training run on it.
+
+**Short play videos.** Videos were ~1 s. Did not find the cause today (resolved 11-15).
+
+**Methods report drafted and submitted.** Sections written today:
+- Simulation: mjlab on MuJoCo Warp, planar base support added to mjlab.
+- Robot Model: MyActuator X8-120, peak 120 N·m, gear 19.61, armature 0.0485.
+  PD gains from a second-order model, ω_n = 2π·10, ζ = 2 -> k_p 191.6, k_d 12.2.
+- Learning Formulation: PPO, asymmetric actor-critic, MLP 512/256/128 with ELU.
+  Action scale α = 0.25·τ_max/k_p ≈ 0.157 rad, so one unit of action needs a quarter
+  of peak torque from rest. Reward adapted from mjlab's G1 velocity task.
+- Load extraction in two phases: train with limits well above the motor ratings and
+  no torque penalty to find the loads the gait wants, then retrain at the real
+  limits with a penalty.
+- Evaluation: velocity tracking RMSE, counted only if the episode survives a
+  minimum time.
+- Extension to jumping: one policy with velocity as an input, so the robot can
+  jump while running and switch between gaits.
+- Domain randomization table. Base linear velocity is privileged in sim and will
+  be estimated from the IMU on hardware (no encoders on the rig, since they aren't
+  on the robot).
+Submitted with an AI-assistance acknowledgment.
+
+## 2026-11-12
+
+**Reward diagnosis.** Videos all show the same thing: the robot lands, puts one
+foot forward or back, and stops. It finds the most stable configuration and stays
+there. Per-term curves in wandb: `upright` earns far more than linear velocity
+tracking, so standing still pays better than walking.
+
+**Terminations and play.** `fell_over` is `bad_orientation`: base tilt from the
+projected gravity vector, limit 70°. Found that play uses its own config block in
+`env_cfgs.py` (commands, curriculum, terminations) on top of the defaults in
+`velocity_command.py`.
+
+**Consistency review of `env_cfgs.py`.** Names all match Diya's XML. Mismatches:
+- `air_time` still at 0.0, though the plan was to turn it on.
+- `track_angular_velocity` still in at weight 2.0, though the plan was to remove it.
+- The `command_vel` curriculum is still active in training and may overwrite the
+  new `lin_vel_x` range.
+- `foot_swing_height` may not be wired to the C1 foot sites.
+
+**Lab PC went down mid-run.** SSH timed out and wandb said "running" but stopped
+updating. In person: no display signal, power button flashing. Run lost.
+Next time: tmux for every run, sleep disabled.
+
+## 2026-11-15
+
+**Config cleanup.** Removed `track_angular_velocity` (it was paying for yaw
+tracking a planar robot can't do, and the curriculum was commanding yaw). Removed
+`command_vel`. Set the `air_time` command threshold to 0.1 so it pays across the
+0.3-1.0 m/s range.
+
+**Root height convention changed.** Pose z is now world height. The planar joint
+value is world position minus the base body's rest position, computed once in
+`_compute_indexing` as `planar_rest_pos`. My first version assumed a per-env
+`body_pos` shape and crashed with an IndexError. A half-applied version buried
+the feet ~0.2 m and launched the robot. Fixed by moving the keyframe to world height.
+
+**Floating-base regression.** `velocity_command.py:131` passed `env_ids` to the
+orientation helper and broke 4 floating-base tests. Fix: `slice(None)`.
+
+**Measurement tools.** Wrote `debug_play.py` (zero-action stepping), `play_angle.py`
+(64 envs, survival rate and mean |cmd - vx|), `record_video.py` (headless video),
+and `stance_check.py` (foot and COM x for a stance). The 1 s videos were me pressing
+Ctrl-C right away: ffprobe showed 56 frames at 50 fps.
+
+**Baseline:** 20% survival over 1000 steps, mean velocity error 0.503 m/s.
+
+**Staggered keyframe.** Point-foot biped can't hold a side-by-side stance. Moved
+to hips -0.55 / -0.10, knees 0.60 / 0.63 (feet at x +0.215 / -0.197, COM +0.044).
+Result: 100% survival, but error 0.614 m/s, because it learned to stand still.
+Later runs: strong rocking, slight rocking, a wide stable stance, and finally a
+steady shuffle with the front foot raised.
+
+**Reward loopholes found so far:** yaw tracking, standing still under `pose` and
+`upright`, large forward lean, rocking to farm instantaneous tracking, `air_time`
+farming, wide stance, shuffle.
+
+**`forward_step` reward.** Pays when a foot lands ahead of the other. Version 1
+paid for tapping the already-forward foot: term steady at 0.2 with a stationary
+robot. Rewrote it to require travel since liftoff. Tested the logic offline in
+numpy against scripted motions: it still paid in full for pumping a foot back and
+forth, stepping forward and sliding back, and the same-lead shuffle. Version 3
+keeps one progress mark per env and requires feet to alternate. In the test,
+each exploit paid once and walking paid in full. Then trained with it:
+
+**Result:** 59% survival, error 0.664 m/s, 70 paid steps over 64 envs (~1 per
+env per 20 s). Logged value was ~0.02 because each step is worth weight × dt and
+the sum is divided by episode length. Checked that mjlab does call `reset()` on
+class reward terms, so that was not the bug. The policy just never finds a
+crossing step. Sparse event rewards don't get discovered.
+
+**Sergio's feedback.** Zero joint angles should mean legs straight down, and the
+pose target should be knees bent and parallel, not split. Asked for a gait phase
+in the observation (0.8 s period) and a contact-schedule reward. Checked the XML:
+the angle offset he remembered was in the old exports. Diya's current XML is
+straight legs at zero. Decided to go with the clock.
+
+**Git.** Committed "Shuffling biped" (03cb5a6). Push still failing: `planar-base`
+has no upstream, and two media files are tracked at the repo root.
+
+## 2026-11-16
+
+**The pose reward has been rewarding the split.** The keyframe sets three things
+at once through `default_joint_pos`: spawn pose, pose reward target, and action
+center (zero action holds the keyframe). Staggering the spawn on 11-15 made the
+split the reward target and the zero-action pose too. Likely contributed to the
+planted stance.
+
+**Decision:** parallel knees-bent for all three. Solved forward kinematics from
+the XML for feet under the COM: hip -0.498, knee 0.80, base z 1.0124 (other
+options: knee 0.6 / hip -0.372 / z 1.046, knee 1.0 / hip -0.626 / z 0.970). The
+clock should make the policy step right away, so it doesn't need a stance that
+holds under zero actions. If falls are too high early, add small random joint
+offsets at reset.
+
+**Next run:**
+- `gait_phase` observation (sin/cos, 0.8 s period) for actor and critic.
+- `gait_contact` reward, weight 1.0: feet half a cycle apart, 60% stance, which
+  leaves short double support.
+- Remove `air_time`. Keep `forward_step` at ~5.
+- Parallel keyframe. Retrain from scratch (observation size changes).
+
+Drafted the reply to Sergio.

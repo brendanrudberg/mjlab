@@ -18,5 +18,5 @@ def show(L_hip, L_knee, R_hip, R_knee):
   print(f"foot height mismatch: {abs(L[2] - R[2]) * 1000:.1f} mm")
   print(f"keyframe z: {d.xpos[base][2] - min(L[2], R[2]) + 0.001:.4f}")
 
-show(-0.30, 0.70, -0.30, 0.70)   # current
+show(-0.498, 0.8, -0.498, 0.8)   # current
 show(-0.55, 0.60, -0.10, 0.63)   # staggered candidate
