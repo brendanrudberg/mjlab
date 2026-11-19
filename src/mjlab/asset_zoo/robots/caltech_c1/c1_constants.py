@@ -62,6 +62,28 @@ C1_ACTUATOR_RMDX8120 = BuiltinPositionActuatorCfg(
   armature=ACTUATOR_RMDX8120.reflected_inertia,
 )
 
+# Gains from the real joint inertia at the default pose (actuator_test.py):
+# hip 1.285 kg*m^2, knee 0.219 kg*m^2. Target zeta = 1.
+HIP_STIFFNESS = 1270.0   # 5 Hz
+HIP_DAMPING = 81.0
+KNEE_STIFFNESS = 550.0   # 8 Hz
+KNEE_DAMPING = 22.0
+
+C1_HIP_ACTUATOR = BuiltinPositionActuatorCfg(
+  target_names_expr=(".*_hip_joint",),
+  stiffness=HIP_STIFFNESS,
+  damping=HIP_DAMPING,
+  effort_limit=ACTUATOR_RMDX8120.effort_limit,
+  armature=ACTUATOR_RMDX8120.reflected_inertia,
+)
+C1_KNEE_ACTUATOR = BuiltinPositionActuatorCfg(
+  target_names_expr=(".*_knee_joint",),
+  stiffness=KNEE_STIFFNESS,
+  damping=KNEE_DAMPING,
+  effort_limit=ACTUATOR_RMDX8120.effort_limit,
+  armature=ACTUATOR_RMDX8120.reflected_inertia,
+)
+
 ##
 # Keyframe config.
 ##
@@ -126,9 +148,7 @@ FEET_ONLY_COLLISION = CollisionCfg(
 ##
 
 C1_ARTICULATION = EntityArticulationInfoCfg(
-  actuators=(
-    C1_ACTUATOR_RMDX8120,
-  ),
+  actuators=(C1_HIP_ACTUATOR, C1_KNEE_ACTUATOR),
   soft_joint_pos_limit_factor=0.9,
 )
 
@@ -147,15 +167,7 @@ def get_c1_robot_cfg() -> EntityCfg:
   )
 
 
-C1_ACTION_SCALE: dict[str, float] = {}
-for a in C1_ARTICULATION.actuators:
-  assert isinstance(a, BuiltinPositionActuatorCfg)
-  e = a.effort_limit
-  s = a.stiffness
-  names = a.target_names_expr
-  assert e is not None
-  for n in names:
-    C1_ACTION_SCALE[n] = 0.25 * e / s # Look into this
+C1_ACTION_SCALE: dict[str, float] = {".*_hip_joint": 0.1, ".*_knee_joint": 0.15}
 
 
 if __name__ == "__main__":

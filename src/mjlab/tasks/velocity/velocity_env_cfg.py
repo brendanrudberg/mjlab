@@ -226,7 +226,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
-      interval_range_s=(1.0, 3.0),
+      interval_range_s=(5.0, 8.0),
       params={
         "velocity_range": {
           "x": (-0.5, 0.5),
