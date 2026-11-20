@@ -499,8 +499,9 @@ class track_smoothed_linear_velocity:
   """Progress toward the commanded forward speed, using an exponential moving
   average of world-frame base vx.
 
-  Returns avg_vx / cmd clipped to [0, 1]: standing still or moving backward earns
-  0, and anything at or above the command earns 1 (overshoot is not penalized).
+  Returns 1 - |avg_vx / cmd - 1| clipped to [0, 1]: a linear peak of 1 at the
+  command, falling to 0 when standing still, moving the wrong way, or going twice
+  the commanded speed or faster.
   For |cmd| <= min_command the ratio is ill-defined, so it falls back to
   exp(-avg_vx^2 / std^2), which rewards standing still.
   """
@@ -525,7 +526,8 @@ class track_smoothed_linear_velocity:
     cmd = command[:, 0]
     moving = torch.abs(cmd) > min_command
     safe_cmd = torch.where(moving, cmd, torch.ones_like(cmd))
-    progress = torch.clamp(self.avg_vx / safe_cmd, 0.0, 1.0)
+    ratio = self.avg_vx / safe_cmd
+    progress = torch.clamp(1.0 - torch.abs(ratio - 1.0), 0.0, 1.0)
     standing = torch.exp(-torch.square(self.avg_vx) / std**2)
     return torch.where(moving, progress, standing)
 
