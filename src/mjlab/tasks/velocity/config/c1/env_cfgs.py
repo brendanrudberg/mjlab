@@ -43,7 +43,13 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # ---------------------------------------------------------------------------
   cfg.scene.entities = {"robot": get_c1_robot_cfg()}
   cfg.viewer.body_name = BASE_BODY
+  # PPO and CaT's batch-max normalization both need many parallel envs.
+  # Play keeps the shared default of 1; override with --env.scene.num-envs.
+  if not play:
+    cfg.scene.num_envs = 4096
 
+  cfg.sim.mujoco.iterations = 50
+  cfg.sim.mujoco.ls_iterations = 50
   cfg.sim.mujoco.ccd_iterations = 500
   cfg.sim.contact_sensor_maxmatch = 500
   cfg.sim.nconmax = 70
@@ -140,6 +146,7 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     func=mdp.illegal_contact,
     params={"sensor_name": "body_ground_contact"},
   )
+  cfg.terminations["nan"] = TerminationTermCfg(func=envs_mdp.nan_detection)
 
   # ---------------------------------------------------------------------------
   # Rewards: CaT uses velocity tracking only. Tracking is on a ~0.8 s moving
@@ -177,7 +184,9 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       mode="reset",
       params={},
     )
-    if cfg.scene.terrain is not None and cfg.scene.terrain.terrain_generator is not None:
+    if (
+      cfg.scene.terrain is not None and cfg.scene.terrain.terrain_generator is not None
+    ):
       terrain_gen = cfg.scene.terrain.terrain_generator
       terrain_gen.curriculum = False
       terrain_gen.num_cols = 5

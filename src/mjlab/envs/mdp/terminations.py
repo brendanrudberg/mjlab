@@ -48,6 +48,7 @@ def nan_detection(env: ManagerBasedRlEnv) -> torch.Tensor:
   """Terminate environments that have NaN/Inf values in their physics state."""
   return NanGuard.detect_nans(env.sim.data)
 
+
 def double_support_too_long(
   env: ManagerBasedRlEnv,
   sensor_name: str,
@@ -72,6 +73,7 @@ def foot_airborne_too_long(
   t_air = contact.data.current_air_time  # [B, 2]
   assert t_air is not None
   return (t_air > max_time).any(dim=1)
+
 
 def air_time_too_short(
   env: ManagerBasedRlEnv,

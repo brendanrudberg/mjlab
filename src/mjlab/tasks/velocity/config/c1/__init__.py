@@ -8,7 +8,7 @@ from .env_cfgs import (
   caltech_c1_flat_env_cfg,
   caltech_c1_rough_env_cfg,
 )
-from .rl_cfg import caltech_c1_ppo_runner_cfg 
+from .rl_cfg import caltech_c1_ppo_runner_cfg
 
 FEET = "feet_ground_contact"
 
@@ -22,25 +22,42 @@ C1_CONSTRAINTS = {
   # Safety, hard.
   "upside_down": ConstraintCfg(cstr.upside_down, max_p=1.0),
   # Style, soft. 0.2 = |sin(pitch)| ~ 11.5 degrees.
-  "base_pitch": ConstraintCfg(cstr.base_pitch, {"limit": 0.2}),
+  "base_pitch": ConstraintCfg(cstr.base_pitch, {"limit": 0.3}),
   # Gait, soft.
   "one_foot_contact": ConstraintCfg(
-    cstr.n_foot_contact, {"sensor_name": FEET, "number_of_desired_feet": 1}
+    cstr.n_foot_contact, {"sensor_name": FEET, "number_of_desired_feet": 1}, max_p=0.05
   ),
-  "air_time_min": ConstraintCfg(cstr.air_time_min, {"sensor_name": FEET, "limit": 0.15}),
+  "air_time_min": ConstraintCfg(
+    cstr.air_time_min, {"sensor_name": FEET, "limit": 0.15}
+  ),
   "air_time_max": ConstraintCfg(cstr.air_time_max, {"sensor_name": FEET, "limit": 0.5}),
-  "hip_range": ConstraintCfg(
-    cstr.joint_range,
-    {"limit": 0.5, "asset_cfg": SceneEntityCfg("robot", joint_names=(".*_hip_joint",))},
-  ),
-  "knee_range": ConstraintCfg(
-    cstr.joint_range,
-    {"limit": 0.5, "asset_cfg": SceneEntityCfg("robot", joint_names=(".*_knee_joint",))},
+  "hip_bounds": ConstraintCfg(
+    cstr.joint_bounds,
+    {
+      "lower": -1.15,
+      "upper": 0.35,
+      "asset_cfg": SceneEntityCfg("robot", joint_names=(".*_hip_joint",)),
+    },
   ),
   "foot_slip": ConstraintCfg(
     cstr.foot_slip,
-    {"sensor_name": FEET, "limit": 0.1,
-     "asset_cfg": SceneEntityCfg("robot", site_names=("left_foot_contact", "right_foot_contact"))},
+    {
+      "sensor_name": FEET,
+      "limit": 0.1,
+      "asset_cfg": SceneEntityCfg(
+        "robot", site_names=("left_foot_contact", "right_foot_contact")
+      ),
+    },
+  ),
+  "swing_clearance": ConstraintCfg(
+    cstr.swing_clearance,
+    {
+      "sensor_name": FEET,
+      "min_height": 0.06,
+      "asset_cfg": SceneEntityCfg(
+        "robot", site_names=("left_foot_contact", "right_foot_contact")
+      ),
+    },
   ),
 }
 

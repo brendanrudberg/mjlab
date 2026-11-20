@@ -229,6 +229,7 @@ def get_free_joint(spec: mujoco.MjSpec) -> mujoco.MjsJoint | None:
       break
   return joint
 
+
 def get_planar_joints(spec: mujoco.MjSpec) -> tuple | None:
   """Return the root body's joints ordered (x, z, pitch) if they form an
   XZ-planar base, else None."""
@@ -244,6 +245,7 @@ def get_planar_joints(spec: mujoco.MjSpec) -> tuple | None:
   if set(by_key) != set(_PLANAR_XZ_PATTERN):
     return None
   return tuple(by_key[k] for k in _PLANAR_XZ_PATTERN)
+
 
 def is_joint_limited(jnt: mujoco.MjsJoint) -> bool:
   """Returns True if a joint is limited."""

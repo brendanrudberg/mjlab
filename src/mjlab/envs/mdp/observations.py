@@ -165,7 +165,7 @@ def height_scan(
 
 
 ##
-# Gait clock. 
+# Gait clock.
 ##
 
 

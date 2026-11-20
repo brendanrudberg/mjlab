@@ -31,10 +31,12 @@ def compute_velocity_from_cvel(
   ang_vel_w = ang_vel_c
   return torch.cat([lin_vel_w, ang_vel_w], dim=-1)
 
+
 class RootType(enum.Enum):
   FIXED = "fixed"
   PLANAR = "planar"
   FLOATING = "floating"
+
 
 @dataclass
 class EntityData:
@@ -113,14 +115,10 @@ class EntityData:
       qw, qy = pose[:, 3], pose[:, 5]
       pitch = 2.0 * torch.atan2(qy, qw)
       pitch = torch.atan2(torch.sin(pitch), torch.cos(pitch))
-      planar = torch.stack(
-        [pose[:, 0] - rest[0], pose[:, 2] - rest[2], pitch], dim=-1
-      )
+      planar = torch.stack([pose[:, 0] - rest[0], pose[:, 2] - rest[2], pitch], dim=-1)
       self.data.qpos[env_ids, self.indexing.planar_joint_q_adr] = planar
 
-  def root_quat_from_qpos(
-    self, env_ids: torch.Tensor | slice
-  ) -> torch.Tensor:
+  def root_quat_from_qpos(self, env_ids: torch.Tensor | slice) -> torch.Tensor:
     """Root orientation as (w, x, y, z), read from qpos (valid before forward())."""
     if self.root_type == RootType.PLANAR:
       pitch = self.data.qpos[env_ids, self.indexing.planar_joint_q_adr[2]]
@@ -138,9 +136,7 @@ class EntityData:
   ) -> None:
     """Write world-frame root velocity into the root's qvel slots."""
     if self.root_type == RootType.PLANAR:
-      planar = torch.stack(
-        [lin_vel_w[:, 0], lin_vel_w[:, 2], ang_vel_w[:, 1]], dim=-1
-      )
+      planar = torch.stack([lin_vel_w[:, 0], lin_vel_w[:, 2], ang_vel_w[:, 1]], dim=-1)
       self.data.qvel[env_ids, self.indexing.planar_joint_v_adr] = planar
     else:
       quat_w = self.root_quat_from_qpos(env_ids)

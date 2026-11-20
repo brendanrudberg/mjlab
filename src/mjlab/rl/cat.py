@@ -105,6 +105,8 @@ class CaTVecEnvWrapper:
       log[f"Constraint_violation/{name}"] = (probs > 0).float().mean()
       log[f"Constraint_prob/{name}"] = probs.mean()
     log["Constraint_prob/delta"] = delta.mean()
+    robot = self._env.unwrapped.scene["robot"]
+    log["Debug/max_joint_vel"] = robot.data.joint_vel.abs().max()
     return obs, rew, dones, extras
 
   # Forward everything else to the wrapped env, including writes such as
@@ -133,13 +135,17 @@ class CaTPPO(PPO):
     super().process_env_step(obs, rewards, dones, extras)
 
 
-def make_cat_runner(base_runner_cls: type, constraints: dict[str, ConstraintCfg], **cat_kwargs):
+def make_cat_runner(
+  base_runner_cls: type, constraints: dict[str, ConstraintCfg], **cat_kwargs
+):
   """Return a runner class that trains with CaT. Use as runner_cls when registering a task."""
 
   class CaTRunner(base_runner_cls):
     def __init__(self, env, train_cfg: dict, log_dir=None, device="cpu", **kwargs):
       train_cfg["algorithm"]["class_name"] = "mjlab.rl.cat:CaTPPO"
-      env = CaTVecEnvWrapper(env, CaT(constraints, device=env.unwrapped.device, **cat_kwargs))
+      env = CaTVecEnvWrapper(
+        env, CaT(constraints, device=env.unwrapped.device, **cat_kwargs)
+      )
       super().__init__(env, train_cfg, log_dir, device, **kwargs)
 
   CaTRunner.__name__ = f"CaT{base_runner_cls.__name__}"

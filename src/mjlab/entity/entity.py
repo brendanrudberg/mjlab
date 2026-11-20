@@ -26,6 +26,7 @@ from mjlab.utils.xml import fix_spec_xml, strip_buffer_textures
 if TYPE_CHECKING:
   from mjlab.entity.variants import VariantMetadata
 
+
 @dataclass(frozen=False)
 class EntityIndexing:
   """Maps entity elements to global indices and addresses in the simulation."""
@@ -194,10 +195,12 @@ class Entity:
 
     free_joints = [j for j in self._all_joints if j.type == mujoco.mjtJoint.mjJNT_FREE]
     if len(free_joints) > 1:
-      raise ValueError(f"Entity spec has {len(free_joints)} freejoints. An Entity models a "
+      raise ValueError(
+        f"Entity spec has {len(free_joints)} freejoints. An Entity models a "
         "single rigid- or articulated-body system with at most one freejoint, "
         "which serves as its root. Model each detached floating body as its own "
-        "entry in SceneCfg.entities instead.")
+        "entry in SceneCfg.entities instead."
+      )
 
     if self._all_joints and self._all_joints[0].type == mujoco.mjtJoint.mjJNT_FREE:
       self._free_joint = self._all_joints[0]
@@ -408,10 +411,12 @@ class Entity:
     w, qx, qy, qz = self.cfg.init_state.rot
     pitch = 2.0 * np.arctan2(qy, w)  # exact for a pure rotation about y
     pitch = np.arctan2(np.sin(pitch), np.cos(pitch))  # wrap to (-pi, pi]
-    by_name = dict(zip(
-      (j.name for j in self._planar_joints),  # ordered (x, z, pitch)
-      (x - rest[0], z - rest[2], pitch),
-    ))
+    by_name = dict(
+      zip(
+        (j.name for j in self._planar_joints),  # ordered (x, z, pitch)
+        (x - rest[0], z - rest[2], pitch),
+      )
+    )
     return np.array([by_name[j.name] for j in self.root_body.joints])
 
   # Attributes.
@@ -882,7 +887,7 @@ class Entity:
       soft_joint_pos_limits=soft_joint_pos_limits,
       gravity_vec_w=torch.tensor([0.0, 0.0, -1.0], device=device).repeat(nworld, 1),
       forward_vec_b=torch.tensor([1.0, 0.0, 0.0], device=device).repeat(nworld, 1),
-      root_type = self.root_type,
+      root_type=self.root_type,
       is_fixed_base=self.is_fixed_base,
       is_articulated=self.is_articulated,
       is_actuated=self.is_actuated,
@@ -1357,9 +1362,12 @@ class Entity:
     joint_v_adr = torch.tensor(joint_v_adr, dtype=torch.int, device=device)
     free_joint_v_adr = torch.tensor(free_joint_v_adr, dtype=torch.int, device=device)
     free_joint_q_adr = torch.tensor(free_joint_q_adr, dtype=torch.int, device=device)
-    planar_joint_v_adr = torch.tensor(planar_joint_v_adr, dtype=torch.int, device=device)
-    planar_joint_q_adr = torch.tensor(planar_joint_q_adr, dtype=torch.int, device=device)
-
+    planar_joint_v_adr = torch.tensor(
+      planar_joint_v_adr, dtype=torch.int, device=device
+    )
+    planar_joint_q_adr = torch.tensor(
+      planar_joint_q_adr, dtype=torch.int, device=device
+    )
 
     if self.is_fixed_base and self.is_mocap:
       mocap_id = int(model.body_mocapid[self.root_body.id])

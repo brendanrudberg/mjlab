@@ -24,7 +24,9 @@ cam.azimuth = 130
 cam.elevation = -15
 
 opt = mujoco.MjvOption()
-opt.flags[mujoco.mjtVisFlag.mjVIS_JOINT] = True   # draw joint axes; set False for a plain render
+opt.flags[mujoco.mjtVisFlag.mjVIS_JOINT] = (
+  True  # draw joint axes; set False for a plain render
+)
 
 with mujoco.Renderer(model, height=1600, width=1600) as renderer:
   renderer.update_scene(data, camera=cam, scene_option=opt)

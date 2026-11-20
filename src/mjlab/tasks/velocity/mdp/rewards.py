@@ -386,6 +386,7 @@ def soft_landing(
       cost = cost * active
   return cost
 
+
 class forward_step:
   """Pay a touchdown only if it lands past the furthest previous touchdown
   (along the command direction) and is the opposite foot from the last paid one."""
@@ -452,6 +453,7 @@ class forward_step:
     self.init[env_ids] = False
     self.last[env_ids] = -1
 
+
 class swing_foot_forward:
   """While exactly one foot is on the ground, pay the swing foot's velocity
   along the command direction. Backward swing is negative, so pumping nets zero."""
@@ -492,9 +494,16 @@ class swing_foot_forward:
       env_ids = slice(None)
     self.fresh[env_ids] = True
 
+
 class track_smoothed_linear_velocity:
-  """Track the commanded forward speed using an exponential moving average of
-  world-frame base vx, so oscillating in place averages to zero and earns nothing."""
+  """Progress toward the commanded forward speed, using an exponential moving
+  average of world-frame base vx.
+
+  Returns avg_vx / cmd clipped to [0, 1]: standing still or moving backward earns
+  0, and anything at or above the command earns 1 (overshoot is not penalized).
+  For |cmd| <= min_command the ratio is ill-defined, so it falls back to
+  exp(-avg_vx^2 / std^2), which rewards standing still.
+  """
 
   def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
     self.avg_vx = torch.zeros(env.num_envs, device=env.device)
@@ -505,6 +514,7 @@ class track_smoothed_linear_velocity:
     command_name: str,
     std: float = 0.5,
     alpha: float = 0.025,
+    min_command: float = 0.1,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   ) -> torch.Tensor:
     asset: Entity = env.scene[asset_cfg.name]
@@ -512,13 +522,18 @@ class track_smoothed_linear_velocity:
     assert command is not None
     vx = asset.data.root_link_lin_vel_w[:, 0]
     self.avg_vx = (1.0 - alpha) * self.avg_vx + alpha * vx
-    error = command[:, 0] - self.avg_vx
-    return torch.exp(-torch.square(error) / std**2)
+    cmd = command[:, 0]
+    moving = torch.abs(cmd) > min_command
+    safe_cmd = torch.where(moving, cmd, torch.ones_like(cmd))
+    progress = torch.clamp(self.avg_vx / safe_cmd, 0.0, 1.0)
+    standing = torch.exp(-torch.square(self.avg_vx) / std**2)
+    return torch.where(moving, progress, standing)
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     if env_ids is None:
       env_ids = slice(None)
     self.avg_vx[env_ids] = 0.0
+
 
 def gait_contact(
   env: ManagerBasedRlEnv,
@@ -539,6 +554,7 @@ def gait_contact(
   match = (in_contact == stance).float().mean(dim=1)  # 0, 0.5 or 1
   active = (torch.abs(command[:, 0]) > command_threshold).float()
   return match * active
+
 
 class variable_posture:
   """Penalize deviation from default pose with speed-dependent tolerance.

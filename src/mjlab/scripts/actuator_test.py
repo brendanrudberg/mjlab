@@ -27,15 +27,19 @@ from mjlab.asset_zoo.robots.caltech_c1.c1_constants import (
 
 LEG_JOINTS = ("L_hip_joint", "L_knee_joint", "R_hip_joint", "R_knee_joint")
 BASE_JOINTS = ("base_px", "base_pz", "base_phi")
-DEFAULT = {"L_hip_joint": -0.498, "L_knee_joint": 0.80,
-           "R_hip_joint": -0.498, "R_knee_joint": 0.80}
+DEFAULT = {
+  "L_hip_joint": -0.498,
+  "L_knee_joint": 0.80,
+  "R_hip_joint": -0.498,
+  "R_knee_joint": 0.80,
+}
 EFFORT = 120.0
 DT = 0.005
 
 
 def build(kp: float, kd: float) -> tuple[mujoco.MjModel, mujoco.MjData]:
   model = mujoco.MjModel.from_xml_path(str(C1_XML))
-  model.opt.timestep = DT/10
+  model.opt.timestep = DT / 10
   model.opt.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
   model.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
   for name in LEG_JOINTS:
@@ -72,7 +76,9 @@ def pd_torque(model, data, targets: dict[str, float], kp: float, kd: float) -> N
     data.qfrc_applied[j.dofadr[0]] = np.clip(tau, -EFFORT, EFFORT)
 
 
-def predicted(model, data, joint: str, kp: float, kd: float) -> tuple[float, float, float]:
+def predicted(
+  model, data, joint: str, kp: float, kd: float
+) -> tuple[float, float, float]:
   d = model.joint(joint).dofadr[0]
   e = np.zeros(model.nv)
   e[d] = 1.0
@@ -93,8 +99,8 @@ def run(model, data, joint: str, kp: float, kd: float, target_fn, duration: floa
     targets = dict(DEFAULT)
     targets[joint] = q0 + target_fn(t)
     for _ in range(10):
-        pd_torque(model, data, targets, kp, kd)
-        mujoco.mj_step(model, data)
+      pd_torque(model, data, targets, kp, kd)
+      mujoco.mj_step(model, data)
     pin_base(model, data)
     ts.append(t)
     qs.append(data.qpos[model.joint(joint).qposadr[0]] - q0)
@@ -137,31 +143,49 @@ def main() -> None:
   args = p.parse_args()
 
   model, data = build(args.kp, args.kd)
-  print(f"kp = {args.kp:.1f} N*m/rad   kd = {args.kd:.2f} N*m*s/rad   "
-        f"armature = {ARMATURE_RMDX8120:.4f}")
+  print(
+    f"kp = {args.kp:.1f} N*m/rad   kd = {args.kd:.2f} N*m*s/rad   "
+    f"armature = {ARMATURE_RMDX8120:.4f}"
+  )
 
   results = {}
   for joint in ("L_hip_joint", "L_knee_joint"):
     set_pose(model, data)
     inertia, wn, zeta = predicted(model, data, joint, args.kp, args.kd)
     print(f"\n== {joint}")
-    print(f"  inertia at default pose: {inertia:.3f} kg*m^2 "
-          f"({inertia / ARMATURE_RMDX8120:.0f}x armature)")
-    print(f"  predicted: natural freq {wn / (2 * math.pi):.2f} Hz, damping ratio {zeta:.2f}")
+    print(
+      f"  inertia at default pose: {inertia:.3f} kg*m^2 "
+      f"({inertia / ARMATURE_RMDX8120:.0f}x armature)"
+    )
+    print(
+      f"  predicted: natural freq {wn / (2 * math.pi):.2f} Hz, damping ratio {zeta:.2f}"
+    )
 
     t0 = 0.5
-    t, q, r = run(model, data, joint, args.kp, args.kd,
-                  lambda t: args.step if t >= t0 else 0.0, 3.0)
+    t, q, r = run(
+      model, data, joint, args.kp, args.kd, lambda t: args.step if t >= t0 else 0.0, 3.0
+    )
     rise, over, settle, err = step_metrics(t, q, args.step, t0)
-    print(f"  step {args.step} rad: rise(90%) {rise * 1000:.0f} ms, "
-          f"overshoot {over:.0f}%, settle(5%) {settle * 1000:.0f} ms, "
-          f"final error {err * 1000:.1f} mrad")
+    print(
+      f"  step {args.step} rad: rise(90%) {rise * 1000:.0f} ms, "
+      f"overshoot {over:.0f}%, settle(5%) {settle * 1000:.0f} ms, "
+      f"final error {err * 1000:.1f} mrad"
+    )
 
-    ts, qs, rs = run(model, data, joint, args.kp, args.kd,
-                     lambda t: args.step * math.sin(2 * math.pi * args.freq * t), 6.0)
+    ts, qs, rs = run(
+      model,
+      data,
+      joint,
+      args.kp,
+      args.kd,
+      lambda t: args.step * math.sin(2 * math.pi * args.freq * t),
+      6.0,
+    )
     ratio, lag_deg, lag_s = sine_metrics(ts, qs, args.freq, args.step, 2.0)
-    print(f"  sine {args.freq} Hz: amplitude {ratio * 100:.0f}% of target, "
-          f"lag {lag_deg:.0f} deg ({lag_s * 1000:.0f} ms)")
+    print(
+      f"  sine {args.freq} Hz: amplitude {ratio * 100:.0f}% of target, "
+      f"lag {lag_deg:.0f} deg ({lag_s * 1000:.0f} ms)"
+    )
     results[joint] = (t, q, r, ts, qs, rs)
 
   if args.plot:

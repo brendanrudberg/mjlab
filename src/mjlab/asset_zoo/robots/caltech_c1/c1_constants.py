@@ -18,7 +18,12 @@ from mjlab.utils.spec_config import CollisionCfg
 ##
 
 C1_XML: Path = (
-  MJLAB_SRC_PATH / "asset_zoo" / "robots" / "caltech_c1" / "xmls" / "mario_primitive.xml"
+  MJLAB_SRC_PATH
+  / "asset_zoo"
+  / "robots"
+  / "caltech_c1"
+  / "xmls"
+  / "mario_primitive.xml"
 )
 assert C1_XML.exists()
 
@@ -32,7 +37,7 @@ def get_spec() -> mujoco.MjSpec:
 ##
 
 # Motor specs (from MyActuator). No stage MOIs, so we assume a single-stage gearbox.
-ROTOR_INERTIA_RMDX8120 = 1.262e-4 # Manufacturer email
+ROTOR_INERTIA_RMDX8120 = 1.262e-4  # Manufacturer email
 GEAR_RMDX8120 = 19.61
 
 ARMATURE_RMDX8120 = ROTOR_INERTIA_RMDX8120 * GEAR_RMDX8120**2
@@ -40,12 +45,12 @@ ARMATURE_RMDX8120 = ROTOR_INERTIA_RMDX8120 * GEAR_RMDX8120**2
 
 ACTUATOR_RMDX8120 = ElectricActuator(
   reflected_inertia=ARMATURE_RMDX8120,
-  velocity_limit=16.5, # no-load speed in rad/s
-  effort_limit=120.0, # peak torque in Nm
+  velocity_limit=16.5,  # no-load speed in rad/s
+  effort_limit=120.0,  # peak torque in Nm
 )
 
 NATURAL_FREQ = 10 * 2.0 * 3.1415926535  # 10Hz
-DAMPING_RATIO = 2.0 # compensates for using armature alone rather than armature plus link inertia, per BeyondMimic S1.
+DAMPING_RATIO = 2.0  # compensates for using armature alone rather than armature plus link inertia, per BeyondMimic S1.
 
 STIFFNESS_RMDX8120 = ARMATURE_RMDX8120 * NATURAL_FREQ**2
 
@@ -64,9 +69,9 @@ C1_ACTUATOR_RMDX8120 = BuiltinPositionActuatorCfg(
 
 # Gains from the real joint inertia at the default pose (actuator_test.py):
 # hip 1.285 kg*m^2, knee 0.219 kg*m^2. Target zeta = 1.
-HIP_STIFFNESS = 1270.0   # 5 Hz
+HIP_STIFFNESS = 1270.0  # 5 Hz
 HIP_DAMPING = 81.0
-KNEE_STIFFNESS = 550.0   # 8 Hz
+KNEE_STIFFNESS = 550.0  # 8 Hz
 KNEE_DAMPING = 22.0
 
 C1_HIP_ACTUATOR = BuiltinPositionActuatorCfg(
@@ -93,7 +98,6 @@ HOME_KEYFRAME = EntityCfg.InitialStateCfg(
   joint_pos={
     ".*_hip_joint": -0.1,
     ".*_knee_joint": 0.3,
-
   },
   joint_vel={".*": 0.0},
 )
@@ -101,8 +105,10 @@ HOME_KEYFRAME = EntityCfg.InitialStateCfg(
 KNEES_BENT_KEYFRAME = EntityCfg.InitialStateCfg(
   pos=(0.0, 0.0, 1.0124),
   joint_pos={
-    "L_hip_joint": -0.498, "L_knee_joint": 0.80,
-    "R_hip_joint": -0.498, "R_knee_joint": 0.80,
+    "L_hip_joint": -0.498,
+    "L_knee_joint": 0.80,
+    "R_hip_joint": -0.498,
+    "R_knee_joint": 0.80,
   },
   joint_vel={".*": 0.0},
 )
