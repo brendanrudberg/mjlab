@@ -168,7 +168,8 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     {"step": 200 * 24, "lin_vel_x": (0.3, 1.5)},
     {"step": 400 * 24, "lin_vel_x": (0.3, 2.0)},
     {"step": 600 * 24, "lin_vel_x": (0.3, 2.5)},
-    {"step": 600 * 24, "lin_vel_x": (0.3, 3.0)},
+    {"step": 800 * 24, "lin_vel_x": (0.3, 3.0)},
+    {"step": 1000 * 24, "lin_vel_x": (0.3, 3.5)},
   ]
   if cfg.scene.terrain is not None and cfg.scene.terrain.terrain_generator is not None:
     cfg.scene.terrain.terrain_generator.curriculum = True
@@ -177,7 +178,7 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # Play mode: long episodes, clean observations, randomized terrain resets.
   # ---------------------------------------------------------------------------
   if play:
-    twist_cmd.ranges.lin_vel_x = (2.0, 2.0)
+    twist_cmd.ranges.lin_vel_x = (2.5, 2.5)
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
     cfg.events.pop("push_robot", None)

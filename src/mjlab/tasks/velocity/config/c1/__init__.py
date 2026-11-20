@@ -18,7 +18,7 @@ C1_CONSTRAINTS = {
   # Safety, soft. No torque constraint in phase 1 (load extraction): the actuator
   # effort limit is the only cap. Add cstr.joint_torque for phase 2.
   "joint_velocity": ConstraintCfg(cstr.joint_velocity, {"limit": 16}),
-  "action_rate": ConstraintCfg(cstr.action_rate, {"limit": 80.0}),
+  "action_rate": ConstraintCfg(cstr.action_rate, {"limit": 120.0}),
   # Safety, hard.
   "upside_down": ConstraintCfg(cstr.upside_down, max_p=1.0),
   # Style, soft. 0.3 = |sin(pitch)| ~ 17.5 degrees.
