@@ -216,7 +216,7 @@ for speed in args.speeds:
   acc = torch.cat(rec.base_accel)
   sim_time = tau.shape[0] * sub_dt  # env-seconds of settled data
   actual = rec.distance / sim_time
-  work_per_m = rec.pos_work / rec.distance
+  work_per_m = rec.pos_work / abs(rec.distance)
   cot = work_per_m / weight
   mean_power = rec.pos_work / sim_time
 

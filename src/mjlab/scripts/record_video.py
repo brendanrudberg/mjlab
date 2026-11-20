@@ -16,7 +16,11 @@ from mjlab.utils.wrappers import VideoRecorder
 
 TASK = "Mjlab-Velocity-Flat-C1"
 ckpt = Path(sys.argv[1])
-steps = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
+steps = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2][0] != "-" else 1000
+# --cmd X commands a fixed forward speed X m/s (default: the play config's).
+cmd_override = (
+  float(sys.argv[sys.argv.index("--cmd") + 1]) if "--cmd" in sys.argv else None
+)
 SETTLE_S = 1.0  # skip the speed-up from rest when summarizing velocity
 no_terminations = "--no-terminations" in sys.argv
 device = "cuda:0"
@@ -24,6 +28,8 @@ device = "cuda:0"
 env_cfg = load_env_cfg(TASK, play=True)
 env_cfg.scene.num_envs = 1
 apply_trained_actuation(env_cfg, ckpt)
+if cmd_override is not None:
+  env_cfg.commands["twist"].ranges.lin_vel_x = (cmd_override, cmd_override)  # type: ignore[attr-defined]
 env_cfg.viewer.width = 1280
 env_cfg.viewer.height = 720
 if no_terminations:
@@ -32,6 +38,8 @@ agent_cfg = load_rl_cfg(TASK)
 
 # Each checkpoint gets its own folder, so videos never overwrite each other.
 out_dir = ckpt.parent / "videos" / ckpt.stem
+if cmd_override is not None:
+  out_dir = out_dir / f"cmd_{cmd_override:+.1f}"
 env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode="rgb_array")
 env = VideoRecorder(
   env,
