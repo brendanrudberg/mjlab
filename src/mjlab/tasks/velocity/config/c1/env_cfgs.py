@@ -132,6 +132,9 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   twist_cmd.heading_command = False
   twist_cmd.ranges.heading = None
   twist_cmd.rel_standing_envs = 0.0
+  # The shared config forces 20% of commands forward (|vx|); the curriculum
+  # already sets the backward/forward mix.
+  twist_cmd.rel_forward_envs = 0.0
 
   # ---------------------------------------------------------------------------
   # Events: bind inherited randomization to C1 geometry; spawn with small +-x speed.
@@ -192,9 +195,6 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # ---------------------------------------------------------------------------
   if play:
     twist_cmd.ranges.lin_vel_x = (-1.0, -1.0)
-    # The shared config makes 20% of resampled commands forward-only (|vx|),
-    # which would flip a backward play command.
-    twist_cmd.rel_forward_envs = 0.0
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
     cfg.events.pop("push_robot", None)

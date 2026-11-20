@@ -60,15 +60,23 @@ def foot_slip(
   env,
   sensor_name: str,
   limit: float,
+  max_slip: float | None = None,
   asset_cfg: SceneEntityCfg = _FEET,
 ) -> torch.Tensor:
-  """Horizontal speed of a foot that is on the ground, above `limit` m/s."""
+  """Horizontal speed of a foot that is on the ground, above `limit` m/s.
+
+  With `max_slip`, the violation saturates once the foot slides at `max_slip`
+  m/s. CaT divides by the batch max, so uncapped, one robot skidding during a
+  fall shrinks every ordinary slip's termination probability to near zero."""
   asset: Entity = env.scene[asset_cfg.name]
   contact: ContactSensor = env.scene[sensor_name]
   assert contact.data.found is not None
   in_contact = (contact.data.found > 0).float()  # [B, 2]
   foot_vx = asset.data.site_lin_vel_w[:, asset_cfg.site_ids, 0].abs()  # [B, 2]
-  return foot_vx * in_contact - limit
+  violation = foot_vx * in_contact - limit
+  if max_slip is not None:
+    violation = violation.clamp(max=max_slip - limit)
+  return violation
 
 
 def joint_range(env, limit: float, asset_cfg: SceneEntityCfg = _ROBOT) -> torch.Tensor:
