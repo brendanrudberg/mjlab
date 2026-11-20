@@ -11,6 +11,7 @@ from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.sensor import ContactSensor
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.velocity.config.c1 import C1_CONSTRAINTS, FEET
+from mjlab.tasks.velocity.config.c1.checkpoint_actuation import apply_trained_actuation
 from mjlab.utils.wrappers import VideoRecorder
 
 TASK = "Mjlab-Velocity-Flat-C1"
@@ -22,6 +23,7 @@ device = "cuda:0"
 
 env_cfg = load_env_cfg(TASK, play=True)
 env_cfg.scene.num_envs = 1
+apply_trained_actuation(env_cfg, ckpt)
 env_cfg.viewer.width = 1280
 env_cfg.viewer.height = 720
 if no_terminations:

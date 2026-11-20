@@ -9,7 +9,8 @@ For each commanded forward speed (default 1.0 2.0 3.0 3.5), runs N parallel envs
   - foot speed (total and downward) just before touchdown, which does not
     depend on the contact model
   - base specific force, i.e. what an accelerometer on the base reads, in g
-  - actuator torque (clipped at the effort limit) and the unclipped PD demand
+  - actuator torque, the unclipped PD demand, and the fraction of time the motor
+    is saturated against the X8-120 speed-torque curve and torque cap
   - joint velocity and mechanical power per joint
   - positive mechanical work per meter and cost of transport
 Recording per substep (not per policy step) catches touchdown spikes that last a
@@ -27,11 +28,13 @@ from pathlib import Path
 import torch
 
 import mjlab.tasks  # noqa: F401  (populates the task registry)
+from mjlab.asset_zoo.robots.caltech_c1 import c1_constants as c1
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.sensor import ContactSensor
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.velocity.config.c1 import FEET
+from mjlab.tasks.velocity.config.c1.checkpoint_actuation import apply_trained_actuation
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 
 TASK = "Mjlab-Velocity-Flat-C1"
@@ -48,8 +51,10 @@ args = parser.parse_args()
 
 env_cfg = load_env_cfg(TASK, play=True)
 env_cfg.scene.num_envs = args.envs
+trained = apply_trained_actuation(env_cfg, args.ckpt)
 twist_cfg = env_cfg.commands["twist"]
 assert isinstance(twist_cfg, UniformVelocityCommandCfg)
+twist_cfg.rel_forward_envs = 0.0  # keep fixed commands fixed (no |vx| flip)
 agent_cfg = load_rl_cfg(TASK)
 env = RslRlVecEnvWrapper(
   ManagerBasedRlEnv(cfg=env_cfg, device=DEVICE), clip_actions=agent_cfg.clip_actions
@@ -70,14 +75,22 @@ settle_steps = int(SETTLE_S / base.step_dt)
 # Both the contact sensor primaries and the robot sites are ordered (left, right).
 assert robot.site_names == ("left_foot_contact", "right_foot_contact")
 
-# Position actuator law: force = gain*ctrl + b0 + b1*length + b2*velocity, then
-# clipped to the effort limit. Parameters are per env: [envs, nu, 10].
 # Actuators are ordered by actuator group (hips, then knees), not by joint, so
 # reorder every actuator-space quantity into joint order.
 act_perm = [robot.actuator_names.index(name) for name in joint_names]
-ctrl_ids = robot.indexing.ctrl_ids.long()[act_perm]
-gain = base.sim.model.actuator_gainprm[..., ctrl_ids, 0]
-bias = base.sim.model.actuator_biasprm[..., ctrl_ids, :3]
+# The X8-120 model is a PD law clipped by the speed-torque curve and torque cap.
+# Recompute the unclipped PD demand and the available torque at each speed.
+kp_list, kd_list = trained.joint_gains(joint_names)
+kp = torch.tensor(kp_list, device=DEVICE)
+kd = torch.tensor(kd_list, device=DEVICE)
+
+
+def available_torque(demand: torch.Tensor, vel: torch.Tensor) -> torch.Tensor:
+  """Most torque the motor can give in the demanded direction at this speed:
+  the speed-torque curve when driving the motion, the cap when braking it."""
+  curve = c1.VOLTAGE_LINE_STALL_TORQUE * (1.0 - vel.abs() / c1.NO_LOAD_SPEED)
+  driving = demand * vel > 0
+  return torch.where(driving, curve.clamp(0.0, c1.TORQUE_CAP), c1.TORQUE_CAP)
 
 
 class Recorder:
@@ -89,6 +102,7 @@ class Recorder:
   def clear(self) -> None:
     self.tau: list[torch.Tensor] = []
     self.tau_demand: list[torch.Tensor] = []
+    self.sat: list[torch.Tensor] = []
     self.vel: list[torch.Tensor] = []
     self.foot_force: list[torch.Tensor] = []
     self.touchdown_speed: list[torch.Tensor] = []
@@ -102,19 +116,18 @@ class Recorder:
 
   def record(self) -> None:
     settled = base.episode_length_buf >= settle_steps
-    data = base.sim.data
     # Joint loads.
     tau = robot.data.actuator_force[:, act_perm]
-    demand = (
-      gain * data.ctrl[:, ctrl_ids]
-      + bias[..., 0]
-      + bias[..., 1] * data.actuator_length[:, ctrl_ids]
-      + bias[..., 2] * data.actuator_velocity[:, ctrl_ids]
-    )
     vel = robot.data.joint_vel
+    demand = kp * (robot.data.joint_pos_target - robot.data.joint_pos) - kd * vel
+    # Saturated: the motor gives all it can at this speed, in the demanded direction.
+    sat = (tau.abs() >= 0.98 * available_torque(demand, vel)) & (
+      demand.abs() > tau.abs() + 1e-3
+    )
     power = tau * vel
     self.tau.append(tau[settled].clone())
     self.tau_demand.append(demand[settled].clone())
+    self.sat.append(sat[settled].clone())
     self.vel.append(vel[settled].clone())
     self.pos_work += float(power[settled].clamp(min=0).sum()) * sub_dt
     base_vel = robot.data.root_link_lin_vel_w.clone()
@@ -194,6 +207,7 @@ for speed in args.speeds:
       falls += int(dones.sum())
   tau = torch.cat(rec.tau)
   demand = torch.cat(rec.tau_demand)
+  saturated = torch.cat(rec.sat)
   vel = torch.cat(rec.vel)
   power = (tau * vel).abs()
   f = torch.cat(rec.foot_force)
@@ -234,7 +248,7 @@ for speed in args.speeds:
   )
   for j, name in enumerate(joint_names):
     t, dm, v, p = tau[:, j].abs(), demand[:, j].abs(), vel[:, j].abs(), power[:, j]
-    sat = (t >= 0.98 * 120.0).float().mean()
+    sat = saturated[:, j].float().mean()
     print(
       f"  {name:14s} {peak(t):6.1f} {t.square().mean().sqrt():5.1f} {sat:5.1%} | "
       f"{peak(dm):9.0f} {q(dm, 0.999):6.0f} {q(dm, 0.99):5.0f} | "
