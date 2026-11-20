@@ -163,10 +163,15 @@ def air_time_min(
 
 def air_time_max(env, sensor_name: str, limit: float) -> torch.Tensor:
   """A foot held in the air longer than `limit` seconds. Not in CaT; closes the
-  raised-foot shuffle, which satisfies single contact and min air time."""
+  raised-foot shuffle, which satisfies single contact and min air time.
+
+  The violation saturates at `limit` (a foot up for 2 * limit or longer). CaT
+  divides by the batch max, so an unbounded violation lets one env holding a
+  foot up for many seconds shrink everyone else's termination probability to
+  near zero, which is how a one-legged hop survived this constraint."""
   contact: ContactSensor = env.scene[sensor_name]
   assert contact.data.current_air_time is not None
-  return contact.data.current_air_time - limit
+  return (contact.data.current_air_time - limit).clamp(max=limit)
 
 
 class StanceTimeMax:
