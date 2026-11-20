@@ -176,6 +176,9 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     (-2.0, 2.5),
     (-2.0, 3.0),
     (-2.0, 3.5),
+    (-2.0, 4.0),
+    (-2.0, 4.5),
+    (-2.0, 5.0),
   ]
   cfg.curriculum["command_vel"].params["velocity_stages"] = [
     {"step": i * 200 * 24, "lin_vel_x": lin_vel_x}
@@ -188,7 +191,10 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # Play mode: long episodes, clean observations, randomized terrain resets.
   # ---------------------------------------------------------------------------
   if play:
-    twist_cmd.ranges.lin_vel_x = (1.5, 1.5)
+    twist_cmd.ranges.lin_vel_x = (-1.0, -1.0)
+    # The shared config makes 20% of resampled commands forward-only (|vx|),
+    # which would flip a backward play command.
+    twist_cmd.rel_forward_envs = 0.0
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
     cfg.events.pop("push_robot", None)

@@ -39,21 +39,21 @@ C1_CONSTRAINTS = {
       "asset_cfg": SceneEntityCfg("robot", joint_names=(".*_hip_joint",)),
     },
   ),
-  "foot_slip": ConstraintCfg(
-    cstr.foot_slip,
-    {
-      "sensor_name": FEET,
-      "limit": 0.1,
-      "asset_cfg": SceneEntityCfg(
-        "robot", site_names=("left_foot_contact", "right_foot_contact")
-      ),
-    },
-  ),
+  # "foot_slip": ConstraintCfg(
+  #  cstr.foot_slip,
+  #  {
+  #    "sensor_name": FEET,
+  #    "limit": 0.1,
+  #    "asset_cfg": SceneEntityCfg(
+  #      "robot", site_names=("left_foot_contact", "right_foot_contact")
+  #    ),
+  #  },
+  # ),
   "swing_clearance": ConstraintCfg(
     cstr.swing_clearance,
     {
       "sensor_name": FEET,
-      "min_height": 0.06,
+      "min_height": 0.03,
       "asset_cfg": SceneEntityCfg(
         "robot", site_names=("left_foot_contact", "right_foot_contact")
       ),
