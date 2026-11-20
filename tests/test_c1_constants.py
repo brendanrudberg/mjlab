@@ -1,4 +1,4 @@
-"""Tests for g1_constants.py."""
+"""Tests for c1_constants.py."""
 
 import re
 
@@ -22,27 +22,34 @@ def c1_model(c1_entity: Entity) -> mujoco.MjModel:
   return c1_entity.spec.compile()
 
 
-# fmt: off
-@pytest.mark.parametrize(
-  "actuator_config,stiffness,damping",
-  [
-    (c1_constants.C1_ACTUATOR_RMDX8120, c1_constants.STIFFNESS_RMDX8120, c1_constants.DAMPING_RMDX8120),
-  ],
-)
-# fmt: on
-def test_actuator_parameters(c1_model, actuator_config, stiffness, damping):
+def test_actuators_follow_gain_switch():
+  gains = c1_constants._GAINS[c1_constants.C1_GAINS]
+  for cfg, joint in (
+    (c1_constants.C1_HIP_ACTUATOR, "hip"),
+    (c1_constants.C1_KNEE_ACTUATOR, "knee"),
+  ):
+    assert (cfg.stiffness, cfg.damping) == gains[joint]
+    assert cfg.effort_limit == c1_constants.TORQUE_CAP
+    params = cfg.motor_params
+    assert isinstance(params, c1_constants.DcMotorDatasheetParams)
+    assert params.no_load_speed == c1_constants.NO_LOAD_SPEED
+
+
+def test_torque_speed_curve_passes_datasheet_points():
+  stall = c1_constants.VOLTAGE_LINE_STALL_TORQUE
+  no_load = c1_constants.NO_LOAD_SPEED
+  rated = stall * (1 - c1_constants.RATED_SPEED / no_load)
+  assert rated == pytest.approx(c1_constants.RATED_TORQUE)
+  assert stall == pytest.approx(219.0, abs=1.0)
+
+
+def test_actuator_parameters(c1_model):
+  # Native <dcmotor>s in position mode, force-limited at the torque cap.
   for i in range(c1_model.nu):
     actuator = c1_model.actuator(i)
-    actuator_name = actuator.name
-    matches = any(
-      re.match(pattern, actuator_name) for pattern in actuator_config.target_names_expr
-    )
-    if matches:
-      assert actuator.gainprm[0] == stiffness
-      assert actuator.biasprm[1] == -stiffness
-      assert actuator.biasprm[2] == -damping
-      assert actuator.forcerange[0] == -actuator_config.effort_limit
-      assert actuator.forcerange[1] == actuator_config.effort_limit
+    assert actuator.forcerange[0] == -c1_constants.TORQUE_CAP
+    assert actuator.forcerange[1] == c1_constants.TORQUE_CAP
+
 
 def initialize_entity_with_sim(entity, device, num_envs=1):
   """Initialize an entity with a simulation."""
@@ -51,6 +58,7 @@ def initialize_entity_with_sim(entity, device, num_envs=1):
   sim = Simulation(num_envs=num_envs, cfg=sim_cfg, model=model, device=device)
   entity.initialize(model, sim.model, sim.data, device)
   return entity, sim
+
 
 def test_keyframe_base_position(c1_model) -> None:
   data = mujoco.MjData(c1_model)
@@ -63,12 +71,14 @@ def test_keyframe_base_position(c1_model) -> None:
     data.qpos[:3], [kf.pos[0] - rest[0], kf.pos[2] - rest[2], expected_pitch]
   )
 
+
 def test_keyframe_feet_on_ground(c1_model) -> None:
   data = mujoco.MjData(c1_model)
   mujoco.mj_resetDataKeyframe(c1_model, data, c1_model.key("init_state").id)
   mujoco.mj_forward(c1_model, data)
   for site in ("left_foot_contact", "right_foot_contact"):
     assert abs(data.site_xpos[c1_model.site(site).id][2]) < 0.01
+
 
 def test_keyframe_joint_positions(c1_entity, c1_model) -> None:
   """Test that keyframe joint positions match the configuration."""
@@ -124,9 +134,7 @@ def test_collision_geom_count(c1_model) -> None:
   ]
   assert len(collision_geoms) > 0
   foot_geoms = [
-    name
-    for name in collision_geoms
-    if re.match(r"^(L|R)_foot_geom$", name)
+    name for name in collision_geoms if re.match(r"^(L|R)_foot_geom$", name)
   ]
   assert len(foot_geoms) == 2
 
@@ -138,11 +146,13 @@ def test_c1_entity_creation(c1_entity) -> None:
   assert not c1_entity.is_fixed_base
   assert c1_entity.root_type == RootType.PLANAR
 
+
 def test_c1_actuators_configured_correctly(c1_model):
   """Verify that all C1 actuators have correct control and force limiting.
 
-  All 4 C1 actuators should have ctrllimited=False (allowing setpoints beyond
-  joint limits) and forcelimited=True (limiting forces to effort limits).
+  All 4 C1 actuators are position-mode <dcmotor>s: ctrl is a joint angle
+  (unlimited, so setpoints may pass joint limits) and force is limited to the
+  torque cap.
   """
   for i in range(c1_model.nu):
     actuator_name = c1_model.actuator(i).name
