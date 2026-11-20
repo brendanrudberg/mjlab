@@ -17,16 +17,16 @@ FEET = "feet_ground_contact"
 C1_CONSTRAINTS = {
   # Safety, soft. No torque constraint in phase 1 (load extraction): the actuator
   # effort limit is the only cap. Add cstr.joint_torque for phase 2.
-  "joint_velocity": ConstraintCfg(cstr.joint_velocity, {"limit": 8}),
+  "joint_velocity": ConstraintCfg(cstr.joint_velocity, {"limit": 16}),
   "action_rate": ConstraintCfg(cstr.action_rate, {"limit": 80.0}),
   # Safety, hard.
   "upside_down": ConstraintCfg(cstr.upside_down, max_p=1.0),
   # Style, soft. 0.3 = |sin(pitch)| ~ 17.5 degrees.
   "base_pitch": ConstraintCfg(cstr.base_pitch, {"limit": 0.3}),
   # Gait, soft.
-  "one_foot_contact": ConstraintCfg(
-    cstr.n_foot_contact, {"sensor_name": FEET, "number_of_desired_feet": 1}, max_p=0.05
-  ),
+  #"one_foot_contact": ConstraintCfg(
+  #  cstr.n_foot_contact, {"sensor_name": FEET, "number_of_desired_feet": 1}, max_p=0.05
+  #),
   "air_time_min": ConstraintCfg(
     cstr.air_time_min, {"sensor_name": FEET, "limit": 0.15}
   ),
