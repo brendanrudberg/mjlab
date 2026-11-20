@@ -174,6 +174,7 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # Play mode: long episodes, clean observations, randomized terrain resets.
   # ---------------------------------------------------------------------------
   if play:
+    twist_cmd.ranges.lin_vel_x = (1.0, 1.0)
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
     cfg.events.pop("push_robot", None)
