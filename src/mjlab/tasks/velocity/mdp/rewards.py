@@ -643,3 +643,35 @@ class variable_posture:
     error_squared = torch.square(current_joint_pos - desired_joint_pos)
 
     return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
+
+
+def motor_heat(
+  env: ManagerBasedRlEnv,
+  rated_torque: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Mean over actuators of (torque / rated_torque)^2.
+
+  Copper loss grows with torque squared, and a motor's rated (continuous) torque
+  is the RMS torque it can hold without overheating. The per-step mean of this
+  term is (RMS torque / rated)^2: 1.0 at the rated load, so short peaks above
+  the rating cost little while sustained high torque costs a lot.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  ratio = asset.data.actuator_force / rated_torque
+  return torch.mean(torch.square(ratio), dim=1)
+
+
+def joint_speed_margin(
+  env: ManagerBasedRlEnv,
+  rated_speed: float,
+  start_fraction: float = 0.8,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Sum over joints of a quadratic penalty that starts at start_fraction of the
+  motor's rated speed and reaches 1.0 at the rated speed. Zero below the start,
+  so normal motion is free and only approaching the rating costs."""
+  asset: Entity = env.scene[asset_cfg.name]
+  start = start_fraction * rated_speed
+  excess = (torch.abs(asset.data.joint_vel) - start) / (rated_speed - start)
+  return torch.sum(torch.square(torch.clamp(excess, min=0.0)), dim=1)

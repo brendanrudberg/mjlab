@@ -10,6 +10,7 @@ upright) are in git history.
 import math
 
 from mjlab.asset_zoo.robots import C1_ACTION_SCALE, get_c1_robot_cfg
+from mjlab.asset_zoo.robots.caltech_c1.c1_constants import RATED_SPEED, RATED_TORQUE
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
@@ -242,4 +243,30 @@ def caltech_c1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.terminations["fell_over"].params["limit_angle"] = math.radians(35.0)
   cfg.curriculum.pop("terrain_levels", None)
 
+  return cfg
+
+
+# Weights relative to the velocity-tracking reward (weight 1.0, value in [0, 1]).
+# At the current gait the heat term averages ~1.1 at 2 m/s and ~1.9 at 4 m/s
+# (hip RMS 51 and 75 N*m), so -0.1 costs 0.1-0.2 per step: a real incentive that
+# keeps the net reward positive, so ending an episode early never pays.
+MOTOR_HEAT_WEIGHT = -0.1
+JOINT_SPEED_MARGIN_WEIGHT = -0.1
+
+
+def caltech_c1_flat_hw_penalty_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Flat C1 task plus penalties for approaching the X8-120 ratings: motor heat
+  ((torque / 43 N*m)^2, i.e. RMS torque against the continuous rating) and joint
+  speed above 80% of the 13.3 rad/s rated speed."""
+  cfg = caltech_c1_flat_env_cfg(play=play)
+  cfg.rewards["motor_heat"] = RewardTermCfg(
+    func=mdp.motor_heat,
+    weight=MOTOR_HEAT_WEIGHT,
+    params={"rated_torque": RATED_TORQUE},
+  )
+  cfg.rewards["joint_speed_margin"] = RewardTermCfg(
+    func=mdp.joint_speed_margin,
+    weight=JOINT_SPEED_MARGIN_WEIGHT,
+    params={"rated_speed": RATED_SPEED, "start_fraction": 0.8},
+  )
   return cfg

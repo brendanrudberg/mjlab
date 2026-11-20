@@ -6,6 +6,7 @@ from mjlab.tasks.velocity.rl import VelocityOnPolicyRunner
 
 from .env_cfgs import (
   caltech_c1_flat_env_cfg,
+  caltech_c1_flat_hw_penalty_env_cfg,
   caltech_c1_rough_env_cfg,
 )
 from .rl_cfg import caltech_c1_ppo_runner_cfg
@@ -78,5 +79,21 @@ register_mjlab_task(
   env_cfg=caltech_c1_flat_env_cfg(),
   play_env_cfg=caltech_c1_flat_env_cfg(play=True),
   rl_cfg=caltech_c1_ppo_runner_cfg(),
+  runner_cls=C1CaTRunner,
+)
+
+
+def _hw_penalty_rl_cfg():
+  cfg = caltech_c1_ppo_runner_cfg()
+  cfg.run_name = "hw_penalty"  # log folder: <timestamp>_hw_penalty
+  return cfg
+
+
+# Same as Flat-C1 plus rewards penalizing motor heat and near-rated joint speed.
+register_mjlab_task(
+  task_id="Mjlab-Velocity-Flat-C1-HwPenalty",
+  env_cfg=caltech_c1_flat_hw_penalty_env_cfg(),
+  play_env_cfg=caltech_c1_flat_hw_penalty_env_cfg(play=True),
+  rl_cfg=_hw_penalty_rl_cfg(),
   runner_cls=C1CaTRunner,
 )
