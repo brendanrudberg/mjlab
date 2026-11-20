@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 import torch
 from rsl_rl.algorithms import PPO
+from rsl_rl.runners import OnPolicyRunner
 
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl.vecenv_wrapper import RslRlVecEnvWrapper
@@ -136,7 +137,9 @@ class CaTPPO(PPO):
 
 
 def make_cat_runner(
-  base_runner_cls: type, constraints: dict[str, ConstraintCfg], **cat_kwargs
+  base_runner_cls: type[OnPolicyRunner],
+  constraints: dict[str, ConstraintCfg],
+  **cat_kwargs,
 ):
   """Return a runner class that trains with CaT. Use as runner_cls when registering a task."""
 

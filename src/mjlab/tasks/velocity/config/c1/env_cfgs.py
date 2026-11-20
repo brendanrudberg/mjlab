@@ -16,7 +16,6 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
   ContactMatch,
   ContactSensorCfg,
@@ -149,8 +148,9 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.terminations["nan"] = TerminationTermCfg(func=envs_mdp.nan_detection)
 
   # ---------------------------------------------------------------------------
-  # Rewards: CaT uses velocity tracking only. Tracking is on a ~0.8 s moving
-  # average of base velocity so rocking in place earns nothing.
+  # Rewards: CaT uses velocity tracking only. The reward is progress toward the
+  # command (vx / cmd, clipped to [0, 1]), so standing still earns nothing.
+  # alpha=1.0 uses instantaneous vx; lower it to track a moving average.
   # ---------------------------------------------------------------------------
   cfg.rewards = {
     "track_smoothed_linear_velocity": RewardTermCfg(

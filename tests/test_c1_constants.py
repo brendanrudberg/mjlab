@@ -8,8 +8,8 @@ import pytest
 
 from mjlab.asset_zoo.robots.caltech_c1 import c1_constants
 from mjlab.entity import Entity, RootType
-from mjlab.utils.string import resolve_expr
 from mjlab.sim.sim import Simulation, SimulationCfg
+from mjlab.utils.string import resolve_expr
 
 
 @pytest.fixture(scope="module")

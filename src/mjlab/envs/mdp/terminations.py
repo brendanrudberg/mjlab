@@ -12,6 +12,7 @@ from mjlab.utils.nan_guard import NanGuard
 if TYPE_CHECKING:
   from mjlab.entity import Entity
   from mjlab.envs.manager_based_rl_env import ManagerBasedRlEnv
+  from mjlab.sensor import ContactSensor
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
@@ -93,7 +94,7 @@ def air_time_too_short(
 def joint_vel_out_of_limit(
   env: ManagerBasedRlEnv,
   max_vel: float,
-  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
   return (asset.data.joint_vel.abs() > max_vel).any(dim=1)

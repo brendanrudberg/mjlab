@@ -54,7 +54,7 @@ def build(kp: float, kd: float) -> tuple[mujoco.MjModel, mujoco.MjData]:
 
 def pin_base(model, data, z_up: float = 1.0) -> None:
   """Weld the base in place by resetting its planar joints every step."""
-  for name, value in zip(BASE_JOINTS, (0.0, z_up, 0.0)):
+  for name, value in zip(BASE_JOINTS, (0.0, z_up, 0.0), strict=True):
     j = model.joint(name)
     data.qpos[j.qposadr[0]] = value
     data.qvel[j.dofadr[0]] = 0.0
@@ -163,7 +163,13 @@ def main() -> None:
 
     t0 = 0.5
     t, q, r = run(
-      model, data, joint, args.kp, args.kd, lambda t: args.step if t >= t0 else 0.0, 3.0
+      model,
+      data,
+      joint,
+      args.kp,
+      args.kd,
+      lambda t, t0=t0: args.step if t >= t0 else 0.0,
+      3.0,
     )
     rise, over, settle, err = step_metrics(t, q, args.step, t0)
     print(

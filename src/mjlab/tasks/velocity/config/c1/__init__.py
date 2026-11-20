@@ -1,8 +1,8 @@
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl.cat import ConstraintCfg, make_cat_runner
 from mjlab.tasks.registry import register_mjlab_task
 from mjlab.tasks.velocity.mdp import constraints as cstr
 from mjlab.tasks.velocity.rl import VelocityOnPolicyRunner
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from .env_cfgs import (
   caltech_c1_flat_env_cfg,
@@ -21,7 +21,7 @@ C1_CONSTRAINTS = {
   "action_rate": ConstraintCfg(cstr.action_rate, {"limit": 80.0}),
   # Safety, hard.
   "upside_down": ConstraintCfg(cstr.upside_down, max_p=1.0),
-  # Style, soft. 0.2 = |sin(pitch)| ~ 11.5 degrees.
+  # Style, soft. 0.3 = |sin(pitch)| ~ 17.5 degrees.
   "base_pitch": ConstraintCfg(cstr.base_pitch, {"limit": 0.3}),
   # Gait, soft.
   "one_foot_contact": ConstraintCfg(

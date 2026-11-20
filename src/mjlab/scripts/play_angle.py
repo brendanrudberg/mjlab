@@ -43,10 +43,12 @@ vel_err = torch.zeros(NUM_ENVS, device=device)
 samples = []
 
 with torch.inference_mode():
-  for i in range(steps):
+  for _ in range(steps):
     obs, _, dones, _ = env.step(policy(obs))
     falls += dones.float()
-    cmd = base.command_manager.get_command("twist")[:, 0]
+    twist = base.command_manager.get_command("twist")
+    assert twist is not None
+    cmd = twist[:, 0]
     vx = robot.data.root_link_lin_vel_w[:, 0]
     vel_err += torch.abs(cmd - vx)
     # Joint angles only from envs that have stayed up a while (walking, not falling).
@@ -70,7 +72,7 @@ if samples:
     f"\njoint range while up > {MIN_UP * base.step_dt:.1f} s "
     f"({allq.shape[0]} samples, 2nd-98th percentile):"
   )
-  for name, a, b in zip(robot.joint_names, lo.tolist(), hi.tolist()):
+  for name, a, b in zip(robot.joint_names, lo.tolist(), hi.tolist(), strict=True):
     print(f"  {name:14s} {a:+.3f}  to  {b:+.3f}")
 else:
   print(

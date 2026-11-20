@@ -2,11 +2,11 @@ import math
 
 import pytest
 import torch
+from conftest import get_test_device
 
 from mjlab.asset_zoo.robots.caltech_c1 import c1_constants
 from mjlab.entity import Entity
 from mjlab.sim.sim import Simulation, SimulationCfg
-from conftest import get_test_device
 
 
 def initialize_entity_with_sim(entity, device, num_envs=1):

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Sequence
 
 import mujoco_warp as mjwarp
 import torch
-import enum
 
 from mjlab.utils.lab_api.math import (
   quat_apply,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import warnings
-import enum
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
@@ -415,6 +414,7 @@ class Entity:
       zip(
         (j.name for j in self._planar_joints),  # ordered (x, z, pitch)
         (x - rest[0], z - rest[2], pitch),
+        strict=True,
       )
     )
     return np.array([by_name[j.name] for j in self.root_body.joints])

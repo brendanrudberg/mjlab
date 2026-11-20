@@ -9,7 +9,6 @@ from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.utils.actuator import (
   ElectricActuator,
-  reflected_inertia_from_two_stage_planetary,
 )
 from mjlab.utils.spec_config import CollisionCfg
 

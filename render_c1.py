@@ -32,4 +32,6 @@ with mujoco.Renderer(model, height=1600, width=1600) as renderer:
   renderer.update_scene(data, camera=cam, scene_option=opt)
   Image.fromarray(renderer.render()).save("c1_render.png")
 
-print(dict(zip([model.joint(i).name for i in range(model.njnt)], data.qpos)))
+print(
+  dict(zip([model.joint(i).name for i in range(model.njnt)], data.qpos, strict=False))
+)

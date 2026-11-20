@@ -1,5 +1,6 @@
 # stance_check.py
 import mujoco
+
 from mjlab.asset_zoo.robots.caltech_c1.c1_constants import C1_XML
 
 m = mujoco.MjModel.from_xml_path(str(C1_XML))

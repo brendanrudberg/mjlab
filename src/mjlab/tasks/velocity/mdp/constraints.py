@@ -18,6 +18,7 @@ if TYPE_CHECKING:
   from mjlab.sensor import ContactSensor
 
 _ROBOT = SceneEntityCfg("robot")
+_FEET = SceneEntityCfg("robot", site_names=(".*_foot_contact",))
 
 
 def _moving(
@@ -47,16 +48,6 @@ def joint_acceleration(
   env, limit: float, asset_cfg: SceneEntityCfg = _ROBOT
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
-  if not getattr(joint_acceleration, "_printed", False):
-    print(
-      "joint_acc shape:",
-      tuple(asset.data.joint_acc.shape),
-      "joint_vel shape:",
-      tuple(asset.data.joint_vel.shape),
-      "joint names:",
-      asset.joint_names,
-    )
-    joint_acceleration._printed = True
   return torch.abs(asset.data.joint_acc) - limit
 
 
@@ -69,7 +60,7 @@ def foot_slip(
   env,
   sensor_name: str,
   limit: float,
-  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=(".*_foot_contact",)),
+  asset_cfg: SceneEntityCfg = _FEET,
 ) -> torch.Tensor:
   """Horizontal speed of a foot that is on the ground, above `limit` m/s."""
   asset: Entity = env.scene[asset_cfg.name]
@@ -102,9 +93,9 @@ def swing_clearance(
   sensor_name: str,
   min_height: float,
   swing_speed: float = 0.3,
-  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=(".*_foot_contact",)),
+  asset_cfg: SceneEntityCfg = _FEET,
 ) -> torch.Tensor:
-  """A foot that is in the air and moving forward faster than `swing_speed`
+  """A foot that is in the air and moving faster than `swing_speed`
   (mid-swing) must be at least `min_height` above flat ground."""
   asset: Entity = env.scene[asset_cfg.name]
   contact: ContactSensor = env.scene[sensor_name]
@@ -184,8 +175,10 @@ class StanceTimeMax:
   can't reset the timer."""
 
   def __init__(self):
-    self.anchor_x = None  # [B, 2] position where each foot last settled
-    self.still_t = None  # [B, 2] seconds each foot has stayed within move_tol
+    # [B, 2] position where each foot last settled.
+    self.anchor_x: torch.Tensor | None = None
+    # [B, 2] seconds each foot has stayed within move_tol.
+    self.still_t: torch.Tensor | None = None
 
   def __call__(
     self,
@@ -195,14 +188,12 @@ class StanceTimeMax:
     ground_tol: float = 0.02,
     command_name: str = "twist",
     min_command: float = 0.1,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg(
-      "robot", site_names=(".*_foot_contact",)
-    ),
+    asset_cfg: SceneEntityCfg = _FEET,
   ) -> torch.Tensor:
     asset: Entity = env.scene[asset_cfg.name]
     pos = asset.data.site_pos_w[:, asset_cfg.site_ids]  # [B, 2, 3]
     foot_x, foot_z = pos[..., 0], pos[..., 2]
-    if self.anchor_x is None:
+    if self.anchor_x is None or self.still_t is None:
       self.anchor_x = foot_x.clone()
       self.still_t = torch.zeros_like(foot_x)
 
