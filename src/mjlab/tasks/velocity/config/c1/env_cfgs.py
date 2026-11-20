@@ -134,11 +134,11 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   twist_cmd.rel_standing_envs = 0.0
 
   # ---------------------------------------------------------------------------
-  # Events: bind inherited randomization to C1 geometry; spawn with forward speed.
+  # Events: bind inherited randomization to C1 geometry; spawn with small +-x speed.
   # ---------------------------------------------------------------------------
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = FOOT_GEOMS
   cfg.events["base_com"].params["asset_cfg"].body_names = (BASE_BODY,)
-  cfg.events["reset_base"].params["velocity_range"]["x"] = (0.0, 0.6)
+  cfg.events["reset_base"].params["velocity_range"]["x"] = (-0.3, 0.3)
   cfg.events["reset_robot_joints"].params["position_range"] = (-0.25, 0.25)
   cfg.events["reset_robot_joints"].params["velocity_range"] = (-0.5, 0.5)
   cfg.terminations["body_contact"] = TerminationTermCfg(
@@ -161,15 +161,25 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   }
 
   # ---------------------------------------------------------------------------
-  # Curriculum: widen the forward command range later in training.
+  # Curriculum: alternately widen the backward and forward command range. Steps
+  # count env steps, so N * 24 is PPO iteration N.
   # ---------------------------------------------------------------------------
+  lin_vel_x_stages = [
+    (0.3, 1.0),
+    (0.0, 1.0),
+    (-0.3, 1.0),
+    (-0.3, 1.5),
+    (-1.0, 1.5),
+    (-1.0, 2.0),
+    (-1.5, 2.0),
+    (-1.5, 2.5),
+    (-2.0, 2.5),
+    (-2.0, 3.0),
+    (-2.0, 3.5),
+  ]
   cfg.curriculum["command_vel"].params["velocity_stages"] = [
-    {"step": 0, "lin_vel_x": (0.3, 1.0)},
-    {"step": 200 * 24, "lin_vel_x": (0.3, 1.5)},
-    {"step": 400 * 24, "lin_vel_x": (0.3, 2.0)},
-    {"step": 600 * 24, "lin_vel_x": (0.3, 2.5)},
-    {"step": 800 * 24, "lin_vel_x": (0.3, 3.0)},
-    {"step": 1000 * 24, "lin_vel_x": (0.3, 3.5)},
+    {"step": i * 200 * 24, "lin_vel_x": lin_vel_x}
+    for i, lin_vel_x in enumerate(lin_vel_x_stages)
   ]
   if cfg.scene.terrain is not None and cfg.scene.terrain.terrain_generator is not None:
     cfg.scene.terrain.terrain_generator.curriculum = True
@@ -178,7 +188,7 @@ def caltech_c1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # Play mode: long episodes, clean observations, randomized terrain resets.
   # ---------------------------------------------------------------------------
   if play:
-    twist_cmd.ranges.lin_vel_x = (3.5, 3.5)
+    twist_cmd.ranges.lin_vel_x = (1.5, 1.5)
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
     cfg.events.pop("push_robot", None)
