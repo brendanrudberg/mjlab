@@ -14,6 +14,7 @@ from mjlab.utils.wrappers import VideoRecorder
 TASK = "Mjlab-Velocity-Flat-C1"
 ckpt = Path(sys.argv[1])
 steps = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
+SETTLE_S = 1.0  # skip the speed-up from rest when summarizing velocity
 no_terminations = "--no-terminations" in sys.argv
 device = "cuda:0"
 
@@ -42,12 +43,39 @@ runner = runner_cls(env, asdict(agent_cfg), device=device)
 runner.load(str(ckpt), load_cfg={"actor": True}, strict=True, map_location=device)
 policy = runner.get_inference_policy(device=device)
 
+base = env.unwrapped
+robot = base.scene["robot"]
+settle_steps = int(SETTLE_S / base.step_dt)
+
 obs = env.get_observations()
 if isinstance(obs, tuple):
   obs = obs[0]
+cmds, vxs, falls = [], [], 0
 with torch.inference_mode():
   for _ in range(steps):
-    obs, _, _, _ = env.step(policy(obs))
+    obs, _, dones, _ = env.step(policy(obs))
+    falls += int(dones.sum())
+    # Skip steps right after a reset, while the robot speeds up from rest.
+    if base.episode_length_buf[0] >= settle_steps:
+      twist = base.command_manager.get_command("twist")
+      assert twist is not None
+      cmds.append(twist[0, 0].item())
+      vxs.append(robot.data.root_link_lin_vel_w[0, 0].item())
 
 env.close()  # flushes and saves the video
 print(f"saved to {out_dir}")
+
+if vxs:
+  cmd_t, vx_t = torch.tensor(cmds), torch.tensor(vxs)
+  print(
+    f"commanded vx: {cmd_t.mean():.2f} m/s (range {cmd_t.min():.2f} to "
+    f"{cmd_t.max():.2f})"
+  )
+  print(
+    f"actual vx:    {vx_t.mean():.2f} +/- {vx_t.std():.2f} m/s "
+    f"(range {vx_t.min():.2f} to {vx_t.max():.2f})"
+  )
+  print(f"mean |cmd - vx|: {(cmd_t - vx_t).abs().mean():.3f} m/s")
+else:
+  print(f"no steps after the first {SETTLE_S:.0f} s of an episode to summarize")
+print(f"falls: {falls}  ({len(vxs)} of {steps} steps summarized)")
