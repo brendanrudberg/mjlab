@@ -25,9 +25,11 @@ Columns:
 """
 
 import argparse
+import csv
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
 import torch
 
 import mjlab.tasks  # noqa: F401  (populates the task registry)
@@ -96,6 +98,7 @@ def evaluate(ckpt: Path, cmds: list[float], envs: int, steps: int) -> dict:
       demand.abs() > tau.abs() + 1e-3
     )
     rec["tau_sq"] += (tau[settled] ** 2).sum(0)
+    rec["samples"].append(torch.stack([tau[settled], vel[settled]], dim=-1))
     rec["sat"] += sat[settled].float().sum(0)
     if settled.any():
       rec["vel_pk"] = max(rec["vel_pk"], float(vel[settled].abs().max()))
@@ -128,6 +131,7 @@ def evaluate(ckpt: Path, cmds: list[float], envs: int, steps: int) -> dict:
   base.scene.update = recording_update  # type: ignore[method-assign]
 
   results = {}
+  samples = {}
   for cmd in cmds:
     twist_cfg.ranges.lin_vel_x = (cmd, cmd)
     rec.clear()
@@ -143,6 +147,7 @@ def evaluate(ckpt: Path, cmds: list[float], envs: int, steps: int) -> dict:
       vx=0.0,
       n=0,
       foot_f=[],
+      samples=[],
       td_vz=[],
       acc=[],
       prev=None,
@@ -175,12 +180,26 @@ def evaluate(ckpt: Path, cmds: list[float], envs: int, steps: int) -> dict:
       "hip_sat": float(sat[hips].mean()),
       "knee_sat": float(sat[knees].mean()),
       "vel_pk": rec["vel_pk"],
-      "cot": rec["work"] / (weight * max(rec["dist"], 1e-6)),
+      # No distance at a standing command, so no cost of transport.
+      "cot": rec["work"] / (weight * max(rec["dist"], 1e-6))
+      if abs(cmd) > 0.1
+      else float("nan"),
+      "falls_per_min": falls / (envs * steps * base.step_dt) * 60.0,
     }
+    # Up to 8000 random (torque, speed) samples per joint for envelope plots.
+    smp = torch.cat(rec["samples"])
+    keep = torch.randperm(smp.shape[0], device=smp.device)[:8000]
+    samples[cmd] = smp[keep].cpu().numpy()
   env.close()
   label = f"{ckpt.parent.name}/{ckpt.stem}"
   info = trained.describe()
-  return {"label": label, "info": info, "results": results}
+  return {
+    "label": label,
+    "info": info,
+    "results": results,
+    "samples": samples,
+    "joint_names": list(names),
+  }
 
 
 def main() -> None:
@@ -191,10 +210,73 @@ def main() -> None:
   )
   parser.add_argument("--envs", type=int, default=64)
   parser.add_argument("--steps", type=int, default=500)
+  parser.add_argument("--csv", type=Path, help="write one row per run and command")
+  parser.add_argument(
+    "--samples", type=Path, help="write (torque, speed) samples as .npz"
+  )
   args = parser.parse_args()
 
   runs = [evaluate(c, args.cmds, args.envs, args.steps) for c in args.ckpts]
   rated = c1.RATED_TORQUE
+  if args.csv:
+    fields = [
+      "run",
+      "label",
+      "cmd",
+      "vx",
+      "err",
+      "falls",
+      "falls_per_min",
+      "td_left",
+      "td_right",
+      "balance",
+      "foot_p99_bw",
+      "td_vz",
+      "acc_p99_g",
+      "hip_rms",
+      "knee_rms",
+      "hip_sat",
+      "knee_sat",
+      "vel_pk",
+      "cot",
+    ]
+    with args.csv.open("w", newline="") as fh:
+      writer = csv.DictWriter(fh, fieldnames=fields)
+      writer.writeheader()
+      for i, run in enumerate(runs):
+        for cmd, r in run["results"].items():
+          writer.writerow(
+            {
+              "run": i,
+              "label": run["label"],
+              "cmd": cmd,
+              "vx": r["vx"],
+              "err": r["err"],
+              "falls": r["falls"],
+              "falls_per_min": r["falls_per_min"],
+              "td_left": r["td"][0],
+              "td_right": r["td"][1],
+              "balance": r["balance"],
+              "foot_p99_bw": r["foot_p99"],
+              "td_vz": r["td_vz"],
+              "acc_p99_g": r["acc_p99"],
+              "hip_rms": r["hip_rms"],
+              "knee_rms": r["knee_rms"],
+              "hip_sat": r["hip_sat"],
+              "knee_sat": r["knee_sat"],
+              "vel_pk": r["vel_pk"],
+              "cot": r["cot"],
+            }
+          )
+    print(f"saved {args.csv}")
+  if args.samples:
+    arrays = {
+      f"run{i}_cmd{cmd:+.1f}": smp
+      for i, run in enumerate(runs)
+      for cmd, smp in run["samples"].items()
+    }
+    np.savez(args.samples, joint_names=np.array(runs[0]["joint_names"]), **arrays)
+    print(f"saved {args.samples}")
 
   print()
   for i, run in enumerate(runs):
