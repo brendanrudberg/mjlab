@@ -5,6 +5,7 @@ from mjlab.tasks.velocity.mdp import constraints as cstr
 from mjlab.tasks.velocity.rl import VelocityOnPolicyRunner
 
 from .env_cfgs import (
+  MOTOR_HEAT_WEIGHT,
   caltech_c1_flat_env_cfg,
   caltech_c1_flat_hw_penalty_env_cfg,
   caltech_c1_rough_env_cfg,
@@ -85,7 +86,8 @@ register_mjlab_task(
 
 def _hw_penalty_rl_cfg():
   cfg = caltech_c1_ppo_runner_cfg()
-  cfg.run_name = "hw_penalty"  # log folder: <timestamp>_hw_penalty
+  # Log folder <timestamp>_hw_penalty_<weight>, e.g. ..._hw_penalty_0.3.
+  cfg.run_name = f"hw_penalty_{abs(MOTOR_HEAT_WEIGHT):g}"
   return cfg
 
 

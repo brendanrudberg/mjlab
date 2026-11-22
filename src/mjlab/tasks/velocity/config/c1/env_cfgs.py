@@ -247,11 +247,12 @@ def caltech_c1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
 
 # Weights relative to the velocity-tracking reward (weight 1.0, value in [0, 1]).
-# At the current gait the heat term averages ~1.1 at 2 m/s and ~1.9 at 4 m/s
-# (hip RMS 51 and 75 N*m), so -0.1 costs 0.1-0.2 per step: a real incentive that
-# keeps the net reward positive, so ending an episode early never pays.
-MOTOR_HEAT_WEIGHT = -0.1
-JOINT_SPEED_MARGIN_WEIGHT = -0.1
+# -0.1 (run 2026-11-20_14-22-40) cut hip RMS torque by only 2-4%. At iteration
+# 3200 the heat term averaged ~1.55 at full speed, where tracking earned ~0.76,
+# so -0.3 costs ~0.47 per step there and keeps the net reward positive (ending an
+# episode early never pays); -0.5 would push it to zero or below.
+MOTOR_HEAT_WEIGHT = -0.3
+JOINT_SPEED_MARGIN_WEIGHT = -0.3
 
 
 def caltech_c1_flat_hw_penalty_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
