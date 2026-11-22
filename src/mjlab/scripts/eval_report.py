@@ -222,12 +222,6 @@ def per_run(runs: dict, i: int, key: str) -> tuple[list[float], list[float]]:
   return cmds, [runs[i][c][key] for c in cmds]
 
 
-def label_end(ax, x: float, y: float, text: str) -> None:
-  ax.annotate(
-    text, (x, y), xytext=(5, 0), textcoords="offset points", va="center", color=INK2
-  )
-
-
 def figures(out: Path, runs: dict, labels: list[str]) -> None:
   n = len(labels)
   # Capability.
@@ -255,6 +249,9 @@ def figures(out: Path, runs: dict, labels: list[str]) -> None:
   axes[1].set_title("Falls")
   axes[1].set_xlabel("commanded (m/s)")
   axes[1].set_ylabel("falls per robot-minute")
+  # Keep a floor on the scale so a handful of falls doesn't look like many.
+  peak_falls = max(max(per_run(runs, i, "falls_per_min")[1]) for i in range(n))
+  axes[1].set_ylim(0, max(1.0, 1.15 * peak_falls))
   axes[1].grid(axis="x", visible=False)
   axes[2].set_title("Tracking error")
   axes[2].set_xlabel("commanded (m/s)")
@@ -272,7 +269,6 @@ def figures(out: Path, runs: dict, labels: list[str]) -> None:
     for i, label in enumerate(labels):
       cmds, y = per_run(runs, i, key)
       ax.plot(cmds, y, color=SERIES[i], marker="o", ms=5, label=label)
-      label_end(ax, cmds[-1], y[-1], label)
     ax.axhline(c1.RATED_TORQUE, color=INK2, lw=1, ls="--", label="43 N·m rated")
     ax.set_title(f"{joint} RMS torque (heat)")
     ax.set_xlabel("commanded (m/s)")
