@@ -666,12 +666,18 @@ def joint_speed_margin(
   env: ManagerBasedRlEnv,
   rated_speed: float,
   start_fraction: float = 0.8,
+  max_excess: float = 2.0,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """Sum over joints of a quadratic penalty that starts at start_fraction of the
   motor's rated speed and reaches 1.0 at the rated speed. Zero below the start,
-  so normal motion is free and only approaching the rating costs."""
+  so normal motion is free and only approaching the rating costs.
+
+  The excess is clamped at max_excess (1.5x rated speed with the defaults), so
+  each joint costs at most max_excess**2. Unbounded, a one-step contact glitch
+  in joint velocity yields a reward large enough to destroy the critic."""
   asset: Entity = env.scene[asset_cfg.name]
   start = start_fraction * rated_speed
   excess = (torch.abs(asset.data.joint_vel) - start) / (rated_speed - start)
-  return torch.sum(torch.square(torch.clamp(excess, min=0.0)), dim=1)
+  excess = torch.clamp(excess, min=0.0, max=max_excess)
+  return torch.sum(torch.square(excess), dim=1)
