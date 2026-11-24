@@ -605,3 +605,127 @@ offsets at reset.
 - Parallel keyframe. Retrain from scratch (observation size changes).
 
 Drafted the reply to Sergio.
+
+## 2026-11-17
+
+**Smoothed velocity tracking.** The clock-based runs were farming upright,
+velocity tracking and the contact schedule by rocking back and forth. Wrote
+`track_smoothed_linear_velocity`: an EMA of world-frame base vx (alpha 0.025,
+~0.8 s window) so oscillation averages out. World frame on purpose, so torso
+pitch doesn't rotate "forward".
+
+**Spawn with forward velocity.** Seeded resets with 0-0.6 m/s forward base
+velocity, on the idea that a point-foot robot has to fall forward to take a
+first step. Didn't produce walking.
+
+**Literature.** Read the Bolt paper (Constrained RL for Unstable Point-Feet
+Bipedal Locomotion). Velocity tracking is the only reward; stepping comes from
+constraints (single foot contact, min air time, torque/vel/acc limits, posture)
+via Constraints as Terminations (CaT). Novelty is mostly applying CaT to point
+feet plus an open-source pipeline and hardware results, not a new algorithm.
+
+**Git.** Committed the pre-constrained work and branched `constrained-RL`.
+
+**Hard-constraint version of CaT.** mjlab has no constrained-RL support, so
+first tried the constraints as hard terminations: double support > 0.3 s, foot
+airborne > 0.6 s, air time < 0.1 s, joint velocity > 16.5 rad/s.
+- Ended exactly at the 0.5 s grace period every time. `short_air_time`
+  dominated, likely contact chatter on the sphere feet.
+- Removed it. Then the policy lunged forward: with near-certain early
+  termination, grabbing velocity reward now is optimal.
+- Conclusion: hard constraints are too harsh early. Need CaT's soft version.
+
+**Slack update to Sergio** on the clock, step-together/rocking exploits, Bolt,
+and the plan to implement soft CaT.
+
+## 2026-11-18
+
+**Implemented soft CaT** (`rl/cat.py`, `mdp/constraints.py`), ported from
+gepetto/constraints-as-terminations against rsl_rl 5.5.2:
+- delta = max_i p_max_i * clip(c_i / c_max_i, 0, 1); reward *= (1 - delta);
+  done = max(done, delta) inside PPO returns only. Soft constraints never reset.
+- Env wrapper computes delta and logs per-constraint violation/probability.
+  `CaTPPO` subclass applies the scaling and converts rollout dones to float.
+  `make_cat_runner` registers it via `runner_cls`, so no train.py edits.
+- p_max ramps from 0.05 to 0.25 over ~1000 iterations (CaT curriculum).
+- Fixed: SceneEntityCfg params weren't resolved, so joint/site selections
+  silently meant "all".
+- Rewards cut to smoothed tracking only. Cleaned up env_cfgs.py.
+- Added `body_contact` termination (base/thigh/shin touching ground). A
+  collapse with the torso near upright wasn't ending episodes.
+- Made Sergio a PDF of the vanilla PPO rewards/observations/terminations.
+  Noted joint configs weren't randomized; added +-0.25 rad joint reset offsets.
+
+**Constraint tuning.** Scaled limits to the C1 (joint velocity 8 rad/s,
+action rate 80, removed joint acceleration since impacts trip it every
+touchdown), added foot slip, Bolt-style hip/knee ranges (+-0.5 rad), and
+debounced contact for `one_foot_contact` (max force over 4 substeps).
+
+**Actuator finding.** Joints were buzzing. Wrote `actuator_test.py` (base
+pinned in air, step and 1.25 Hz sine on one joint):
+- Real joint inertia: hip 1.285 kg*m^2 (26x armature), knee 0.219.
+- Original gains (armature-only recipe): hip zeta ~0.4, underdamped.
+- Even critically damped at kp 191.6, hip reached only 67% of a 1.25 Hz
+  swing with a 131 ms lag.
+- New gains: hip kp 1270 / kd 81 (5 Hz), knee kp 550 / kd 22 (8 Hz). Hip
+  then 93% amplitude, 59 ms lag. First knee result was an explicit-integration
+  artifact in my script; fixed with substeps.
+- Stiffer gains made exploration noise slam the motors (buzz). debug_play with
+  zero actions was stable, so it was policy jitter, not sim instability. Cut
+  action scale to 0.1 hip / 0.15 knee, init noise 0.5, restored
+  `action_rate_l2` (-0.1). Gains not yet checked against the MyActuator driver.
+
+**Results (1 env, see 11-19).** Took 2 steps around iteration 3400, then 5
+steps before slipping. Committed "5 steps in!" (432dcb0). Kept losing the walk
+to standing or collapsing, with value-loss spikes and the adaptive LR pinned
+low. Obs normalization was already on. Added NaN termination and max joint
+velocity logging. Tried forward_step and instantaneous tracking (alpha = 1).
+
+**Sergio** asked for overnight Claude-driven reward tuning and said the task
+should be easy. Kept CaT running alongside.
+
+## 2026-11-19
+
+**Horizon collapse.** Constraints violated constantly, mean delta ~0.18. With
+gamma 0.996 that's an effective horizon of ~5 steps (0.1 s), too short to plan
+a catch step. Top contributors: knee range, base pitch, one_foot_contact,
+hip range.
+- Knee range +-0.5 around 0.8 blocked swing folding. Base pitch 0.2 (~11.5 deg)
+  penalized normal forward lean. one_foot_contact fires at every touchdown.
+- Fresh run with base pitch 0.3, knee range 0.8, one_foot_contact max_p 0.05,
+  otherwise matching the best run's settings (lr 1e-3 adaptive, 5 epochs,
+  gamma 0.996).
+
+**9 steps**, but asymmetric: one knee folding more. Wrote a left/right mirror
+function for rsl_rl's symmetry augmentation (not yet enabled; joint/action
+order to verify). Swing foot scuffing the ground and slipping, so wrote a
+swing-clearance constraint.
+
+**Measured the gait** with an updated `play_angle.py` (joint percentiles only
+from envs up > 2 s). Baseline: 0% survival, ~13 falls/env, ~1.5 s episodes,
+0.48 m/s error. Knees use nearly the full range (straight in stance, ~2.4 rad
+in swing), so dropped the knee constraint. Replaced hip range with absolute
+bounds [-1.15, 0.35]. Clear L/R asymmetry (L knee max 2.39 vs R 1.86-2.08).
+
+**Solver.** "linesearch iterations limit reached" warnings: the velocity task
+uses iterations 10 / ls_iterations 20. Raised both to 50. Warnings gone,
+metrics barely changed.
+
+**Standing.** Loosening one_foot_contact let the policy stand still (still
+earns ~0.18/step from the Gaussian tracking reward and never falls). Added a
+stance-time constraint; it never fired because contact chatter resets the
+contact timer. Rewrote it to detect stance by foot displacement. Replaced the
+Gaussian tracking reward with clamp(v_avg / v_cmd, 0, 1) so standing earns 0.
+
+**Root cause found.** Every training run so far used num_envs = 1 (mjlab's
+default without --env.scene.num-envs 4096), so each PPO update saw ~24 samples.
+At 4096 envs the robot walked cleanly within 250 iterations.
+- Explains the collapses, value spikes, pinned LR, staircase curves, and
+  "doesn't maximize reward."
+- Still valid: actuator analysis, solver warning, constraint code.
+- Not valid: reward-vs-CaT comparison, "both methods hit the same ceiling,"
+  most training diagnoses from 11-17 to 11-19.
+- Next: set num_envs = 4096 in the config, rerun the vanilla reward setup at
+  4096 for a fair comparison, tell Sergio.
+
+Installed Claude Code on the lab PC.
